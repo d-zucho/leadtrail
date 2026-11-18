@@ -1,4 +1,5 @@
 mod activity;
+mod backup;
 mod cases;
 mod connections;
 mod db;
@@ -20,10 +21,18 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            // A restore staged by the previous session is applied before the database opens.
+            match backup::apply_pending(&dir) {
+                Ok(true) => eprintln!("fieldnotes: restored from backup"),
+                Ok(false) => {}
+                Err(e) => eprintln!("fieldnotes: restore failed, keeping current data: {e}"),
+            }
             let conn = db::open(&dir.join("fieldnotes.db"))?;
             app.manage(db::Db(std::sync::Mutex::new(conn)));
             let vault = dir.join("vault");
             std::fs::create_dir_all(vault.join("evidence"))?;
+            // Print views are throwaway copies; don't let them pile up.
+            let _ = std::fs::remove_dir_all(vault.join("exports"));
             app.manage(sources::Vault(vault));
             Ok(())
         })
@@ -71,6 +80,10 @@ pub fn run() {
             documents::list_queue,
             documents::export_document,
             documents::open_print_view,
+            backup::data_info,
+            backup::reveal_data_dir,
+            backup::backup_vault,
+            backup::restore_backup,
             search::search
         ])
         .run(tauri::generate_context!())

@@ -166,6 +166,11 @@ const MIGRATIONS: &[&str] = &[
 "#,
 ];
 
+/// The schema version this build understands.
+pub fn schema_version() -> i64 {
+    MIGRATIONS.len() as i64
+}
+
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;

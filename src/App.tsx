@@ -7,6 +7,7 @@ import { Cases } from "@/routes/Cases";
 import { Dashboard } from "@/routes/Dashboard";
 import { Inbox } from "@/routes/Inbox";
 import { Publication } from "@/routes/Publication";
+import { Settings } from "@/routes/Settings";
 import { Sources } from "@/routes/Sources";
 
 // The editor (TipTap) and the graph (React Flow) are large, so load them on demand.
@@ -46,6 +47,7 @@ export default function App() {
                 </Suspense>
               }
             />
+            <Route path="settings" element={<Settings />} />
             <Route path="publication" element={<Publication />} />
           </Route>
         </Routes>

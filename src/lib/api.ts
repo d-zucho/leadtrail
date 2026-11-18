@@ -279,7 +279,18 @@ export interface Hit {
   snippet: string;
 }
 
+export interface DataInfo {
+  path: string;
+  evidence_files: number;
+  evidence_bytes: number;
+  db_bytes: number;
+}
+
 export const api = {
+  dataInfo: () => invoke<DataInfo>("data_info"),
+  revealDataDir: () => invoke<void>("reveal_data_dir"),
+  backupVault: (path: string) => invoke<{ files: number; bytes: number }>("backup_vault", { path }),
+  restoreBackup: (path: string) => invoke<void>("restore_backup", { path }),
   search: (query: string) => invoke<Hit[]>("search", { query }),
 
   getGraph: (caseId: number) => invoke<Graph>("get_graph", { caseId }),

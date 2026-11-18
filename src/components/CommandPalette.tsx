@@ -92,6 +92,7 @@ function Palette() {
       { key: "c:inbox", label: "Go to Lead inbox", hint: "Go", run: go("/inbox") },
       { key: "c:sources", label: "Go to Source library", hint: "Go", run: go("/sources") },
       { key: "c:graph", label: "Go to Connections", hint: "Go", run: go("/connections") },
+      { key: "c:settings", label: "Settings, backup & restore", hint: "Go", run: go("/settings") },
       {
         key: "c:capture",
         label: "Quick capture a lead",

@@ -8,6 +8,7 @@ const NAV = [
   { to: "/sources", label: "Source library" },
   { to: "/connections", label: "Connections" },
   { to: "/publication", label: "Publication queue" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export function Sidebar() {
