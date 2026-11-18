@@ -1,0 +1,138 @@
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Newsreader", Georgia, serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-paper: #f6f4ee;
+  --color-card: #fbfaf6;
+  --color-line: #e3dfd3;
+  --color-ink: #1f2a24;
+  --color-muted: #7b8179;
+  --color-forest: #2f5d4c;
+  --color-forest-deep: #1c2e27;
+  --color-sage: #e4ebe4;
+  --color-sand: #ece3cc;
+  --color-alert: #b4402f;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Rich-text editor ---- */
+.prose-editor {
+  min-height: 55vh;
+  outline: none;
+  font-size: 1.0625rem;
+  line-height: 1.75;
+}
+.prose-editor > * + * {
+  margin-top: 0.85em;
+}
+.prose-editor h1,
+.prose-editor h2,
+.prose-editor h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: 1.2;
+  margin-top: 1.6em;
+}
+.prose-editor h1 { font-size: 2.1rem; }
+.prose-editor h2 { font-size: 1.65rem; }
+.prose-editor h3 { font-size: 1.3rem; }
+.prose-editor ul,
+.prose-editor ol {
+  padding-left: 1.4rem;
+}
+.prose-editor ul { list-style: disc; }
+.prose-editor ol { list-style: decimal; }
+.prose-editor li > p { margin: 0; }
+.prose-editor blockquote {
+  border-left: 3px solid var(--color-forest);
+  padding-left: 1rem;
+  color: var(--color-muted);
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+.prose-editor code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-sage);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.prose-editor pre {
+  background: var(--color-forest-deep);
+  color: #e8efe9;
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  overflow-x: auto;
+}
+.prose-editor pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+.prose-editor hr {
+  border: 0;
+  border-top: 1px solid var(--color-line);
+  margin: 1.8rem 0;
+}
+.prose-editor a {
+  color: var(--color-forest);
+  text-decoration: underline;
+}
+.prose-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-muted);
+  opacity: 0.7;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.prose-editor ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.prose-editor ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.prose-editor ul[data-type="taskList"] li > label {
+  margin-top: 0.45rem;
+  user-select: none;
+}
+.prose-editor ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+.prose-editor ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+.prose-editor .wikilink {
+  color: var(--color-forest);
+  background: var(--color-sage);
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.prose-editor .wikilink:hover {
+  background: var(--color-forest);
+  color: white;
+}
