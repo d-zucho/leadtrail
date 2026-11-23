@@ -134,6 +134,10 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
+.prose-editor .wikilink-party {
+  color: var(--color-forest-deep);
+  background: var(--color-sand);
+}
 .prose-editor .wikilink:hover {
   background: var(--color-forest);
   color: white;

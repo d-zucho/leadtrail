@@ -200,7 +200,7 @@ export interface Backlink {
 }
 
 export interface LinkRef {
-  dst_type: "document" | "source";
+  dst_type: "document" | "source" | "party";
   dst_id: number;
   label: string;
 }

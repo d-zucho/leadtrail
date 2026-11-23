@@ -1,13 +1,14 @@
 import type { JSONContent } from "@tiptap/core";
 import type { LinkRef } from "@/lib/api";
 
-const ID_RE = /^(doc|src):(\d+)$/;
+const ID_RE = /^(doc|src|party):(\d+)$/;
 
-/** Mention ids are stored as "doc:<id>" or "src:<id>". */
+/** Mention ids are stored as "doc:<id>", "src:<id>" or "party:<id>". */
 export function parseTargetId(id: string | null | undefined) {
   const m = id ? ID_RE.exec(id) : null;
   if (!m) return null;
-  return { type: m[1] === "doc" ? ("document" as const) : ("source" as const), id: Number(m[2]) };
+  const type = m[1] === "doc" ? ("document" as const) : m[1] === "src" ? ("source" as const) : ("party" as const);
+  return { type, id: Number(m[2]) };
 }
 
 /** Collects the [[links]] in a document, one per distinct target. */

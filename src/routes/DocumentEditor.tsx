@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { buildExtensions, type EditorContext, type LinkTarget } from "@/editor/extensions";
 import { extractLinks, parseTargetId } from "@/editor/links";
-import type { Doc } from "@/lib/api";
+import { api, type Doc } from "@/lib/api";
 import {
   useBacklinks,
   useCreateDocument,
@@ -153,6 +153,7 @@ function EditorView({ doc, caseId }: { doc: Doc; caseId: number }) {
     const ctx: EditorContext = {
       getTargets: () => targetsRef.current,
       createNote: async (t) => (await createDocRef.current({ caseId, kind: "note", title: t })).id,
+      searchParties: (q) => api.searchParties(q, caseId, 5),
     };
     return buildExtensions(ctx);
   }, [caseId]);
@@ -201,6 +202,9 @@ function EditorView({ doc, caseId }: { doc: Doc; caseId: number }) {
     if (target.type === "document") {
       clearTimer();
       void flush().then(() => navigate(`/cases/${caseId}/docs/${target.id}`));
+    } else if (target.type === "party") {
+      clearTimer();
+      void flush().then(() => navigate(`/people?party=${target.id}&case=${caseId}`));
     } else {
       setOpenSourceId(target.id);
     }
