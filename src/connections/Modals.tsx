@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
@@ -8,11 +8,20 @@ import {
   useCreatePartyAndLink,
   useCreateRelationship,
   useLinkParty,
+  usePartySearch,
   useUpdateEntity,
 } from "@/lib/queries";
 
 const SELECT =
   "w-full rounded-md border border-line bg-card px-3 py-2 text-sm outline-none focus:border-forest";
+
+/** Option label for an entity: name plus description, or `#id` when it would be ambiguous. */
+export function entityLabel(e: Entity, all: Entity[]): string {
+  if (e.description) return `${e.name} — ${e.description}`;
+  const same = (o: Entity) => o.id !== e.id && o.name.trim().toLowerCase() === e.name.trim().toLowerCase();
+  const dup = all.some(same);
+  return dup ? `${e.name} (#${e.party_id})` : e.name;
+}
 
 export function EntityModal({
   caseId,
@@ -57,6 +66,11 @@ export function EntityModal({
     }
   }
 
+  const deferredName = useDeferredValue(name);
+  const { data: matches } = usePartySearch(deferredName, caseId, 8);
+  const typed = name.trim().toLowerCase();
+  const hasSameName = typed !== "" && (matches ?? []).some((p) => p.name.trim().toLowerCase() === typed);
+
   const busy = link.isPending || create.isPending || updateEntity.isPending;
 
   return (
@@ -98,7 +112,7 @@ export function EntityModal({
             Cancel
           </Button>
           <Button type="submit" variant="primary" disabled={!name.trim() || busy}>
-            Create new
+            {hasSameName ? `Create another “${name.trim()}”` : "Create new"}
           </Button>
         </div>
       </form>
@@ -162,7 +176,7 @@ export function ConnectModal({
             <select value={from} onChange={(e) => setFrom(Number(e.target.value))} className={SELECT}>
               {entities.map((e) => (
                 <option key={e.id} value={e.id}>
-                  {e.name}
+                  {entityLabel(e, entities)}
                 </option>
               ))}
             </select>
@@ -179,7 +193,7 @@ export function ConnectModal({
                 .filter((e) => e.id !== from)
                 .map((e) => (
                   <option key={e.id} value={e.id}>
-                    {e.name}
+                    {entityLabel(e, entities)}
                   </option>
                 ))}
             </select>

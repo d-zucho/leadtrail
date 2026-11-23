@@ -18,7 +18,7 @@ const KIND_LABEL: Record<HitKind, string> = {
   lead: "Lead",
   document: "Note",
   question: "Question",
-  entity: "Entity",
+  entity: "In case graph",
   party: "Person / company",
 };
 

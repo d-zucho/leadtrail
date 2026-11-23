@@ -29,6 +29,9 @@ export function EntityNode({ data, selected }: NodeProps<EntityFlowNode>) {
         {KIND_LABEL[entity.kind]}
       </div>
       <div className="mt-0.5 text-sm font-medium leading-snug">{entity.name}</div>
+      {entity.description && (
+        <div className="mt-0.5 truncate text-xs text-muted">{entity.description}</div>
+      )}
       <Handle type="source" position={Position.Bottom} className="!bg-forest" />
     </div>
   );

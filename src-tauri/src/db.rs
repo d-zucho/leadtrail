@@ -217,10 +217,17 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 pub(crate) fn migrate_to(conn: &Connection, target: usize) -> rusqlite::Result<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     for (i, sql) in MIGRATIONS.iter().enumerate().take(target).skip(current as usize) {
-        conn.execute_batch(sql)?;
-        conn.pragma_update(None, "user_version", i as i64 + 1)?;
+        apply(conn, sql, i as i64 + 1)?;
     }
     Ok(())
+}
+
+/// Runs one migration and its version bump atomically: a failure leaves the DB at the previous version.
+fn apply(conn: &Connection, sql: &str, version: i64) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(sql)?;
+    tx.pragma_update(None, "user_version", version)?;
+    tx.commit()
 }
 
 #[tauri::command]
@@ -241,6 +248,15 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         migrate_to(&conn, 8).unwrap();
         conn
+    }
+
+    #[test]
+    fn a_failing_migration_rolls_back_completely() {
+        let conn = v8();
+        let r = apply(&conn, "CREATE TABLE half_done (id INTEGER); INSERT INTO no_such_table VALUES (1);", 9);
+        assert!(r.is_err());
+        assert_eq!(count(&conn, "PRAGMA user_version"), 8);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'half_done'"), 0);
     }
 
     fn count(conn: &Connection, sql: &str) -> i64 {

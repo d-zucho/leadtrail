@@ -12,6 +12,7 @@ pub struct Entity {
     pub kind: String,
     pub name: String,
     pub notes: String,
+    pub description: String,
     pub x: Option<f64>,
     pub y: Option<f64>,
 }
@@ -82,7 +83,8 @@ fn exists_in_case(conn: &Connection, table: &str, id: i64, case_id: i64) -> bool
 
 pub fn load_graph(conn: &Connection, case_id: i64) -> rusqlite::Result<Graph> {
     let mut stmt = conn.prepare(
-        "SELECT id, case_id, kind, name, notes, x, y, party_id FROM entities WHERE case_id = ?1 ORDER BY id",
+        "SELECT e.id, e.case_id, e.kind, e.name, e.notes, e.x, e.y, e.party_id, p.description \
+         FROM entities e JOIN parties p ON p.id = e.party_id WHERE e.case_id = ?1 ORDER BY e.id",
     )?;
     let entities = stmt
         .query_map([case_id], |r| {
@@ -95,6 +97,7 @@ pub fn load_graph(conn: &Connection, case_id: i64) -> rusqlite::Result<Graph> {
                 x: r.get(5)?,
                 y: r.get(6)?,
                 party_id: r.get(7)?,
+                description: r.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -362,6 +365,17 @@ mod tests {
 
     fn rel(from: i64, to: i64, label: &str) -> RelationshipInput {
         RelationshipInput { from_id: from, to_id: to, label: label.into(), notes: None }
+    }
+
+    #[test]
+    fn load_graph_returns_the_party_description() {
+        let conn = setup();
+        conn.execute("UPDATE parties SET description = 'Treasurer' WHERE id = 3", []).unwrap();
+        conn.execute("INSERT INTO entities (id, case_id, kind, name, party_id) VALUES (4, 1, 'person', 'Maya', 3)", []).unwrap();
+        let g = load_graph(&conn, 1).unwrap();
+        let d = |id: i64| g.entities.iter().find(|e| e.id == id).unwrap().description.clone();
+        assert_eq!(d(4), "Treasurer");
+        assert_eq!(d(1), "");
     }
 
     #[test]

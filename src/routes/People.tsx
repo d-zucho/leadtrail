@@ -9,6 +9,7 @@ import { useDeleteParty, useParty, usePartySearch, useUpdateParty } from "@/lib/
 const SELECT =
   "w-full rounded-md border border-line bg-card px-3 py-2 text-sm outline-none focus:border-forest";
 
+const plural = (n: number) => `${n} ${n === 1 ? "connection" : "connections"}`;
 const kindLabel = (kind: string) => ENTITY_KINDS.find((k) => k.value === kind)?.label ?? kind;
 
 export function People() {
@@ -200,7 +201,7 @@ function PartyEditor({ detail, onDeleted }: { detail: PartyDetail; onDeleted: ()
         </label>
 
         {detail.in_this_case && (
-          <p className="text-sm">In this case: {detail.in_this_case.connections} connections</p>
+          <p className="text-sm">In this case ({detail.in_this_case.code}): {plural(detail.in_this_case.connections)}</p>
         )}
 
         {detail.cases ? (
@@ -217,7 +218,7 @@ function PartyEditor({ detail, onDeleted }: { detail: PartyDetail; onDeleted: ()
                     <span className="font-mono text-xs text-muted">{c.code}</span>
                     <span>{c.title}</span>
                     <span className="ml-auto text-xs text-muted">
-                      {c.connections} connections
+                      {plural(c.connections)}
                     </span>
                   </Link>
                 </li>
@@ -226,7 +227,8 @@ function PartyEditor({ detail, onDeleted }: { detail: PartyDetail; onDeleted: ()
           )
         ) : (
           <p className="text-sm text-muted">
-            Case details are hidden. Turn on “Show which cases this appears in” to list them.
+            Case details are hidden. Turn on “Show which cases this appears in” to list them.{" "}
+            ⌘K search still looks inside every case file.
           </p>
         )}
       </div>

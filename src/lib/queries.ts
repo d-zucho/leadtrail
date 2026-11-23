@@ -39,6 +39,7 @@ function useGraphMutation<V, R>(fn: (v: V) => Promise<R>) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["graph"] });
       qc.invalidateQueries({ queryKey: ["cases"] });
+      qc.invalidateQueries({ queryKey: ["parties"] });
     },
   });
 }
@@ -325,6 +326,7 @@ export function useDeleteCase() {
       qc.invalidateQueries({ queryKey: ["backlinks"] });
       qc.invalidateQueries({ queryKey: ["questions"] });
       qc.invalidateQueries({ queryKey: ["graph"] });
+      qc.invalidateQueries({ queryKey: ["parties"] });
     },
   });
 }

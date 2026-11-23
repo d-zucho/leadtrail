@@ -226,6 +226,7 @@ export interface Entity {
   kind: EntityKind;
   name: string;
   notes: string;
+  description: string;
   party_id: number;
   x: number | null;
   y: number | null;
