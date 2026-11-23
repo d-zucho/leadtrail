@@ -21,7 +21,7 @@ pub struct Hit {
 
 /// Turns free text into a safe FTS5 query: every word becomes a quoted prefix
 /// term, all of which must match. Returns None when nothing searchable remains.
-fn to_match(q: &str) -> Option<String> {
+pub(crate) fn to_match(q: &str) -> Option<String> {
     let terms: Vec<String> = q
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())

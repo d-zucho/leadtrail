@@ -6,6 +6,7 @@ mod db;
 mod documents;
 mod export;
 mod leads;
+mod parties;
 mod questions;
 mod search;
 mod sources;
@@ -66,6 +67,10 @@ pub fn run() {
             questions::update_question,
             questions::delete_question,
             activity::recent_activity,
+            parties::commands::create_party,
+            parties::commands::update_party,
+            parties::commands::delete_party,
+            parties::commands::search_parties,
             connections::get_graph,
             connections::create_entity,
             connections::update_entity,
