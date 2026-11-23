@@ -77,6 +77,8 @@ export const useCreatePartyAndLink = () =>
   usePartyMutation((v: { caseId: number; input: PartyInput }) =>
     api.createPartyAndLink(v.caseId, v.input),
   );
+export const useCreateParty = () =>
+  usePartyMutation((input: PartyInput) => api.createParty(input));
 export const useUpdateParty = () =>
   usePartyMutation((v: { id: number; input: PartyInput }) => api.updateParty(v.id, v.input));
 export const useDeleteParty = () => usePartyMutation((id: number) => api.deleteParty(id));

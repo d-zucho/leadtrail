@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input, Label, Textarea } from "@/components/ui/Field";
 import { ENTITY_KINDS, type PartyDetail } from "@/lib/api";
-import { useDeleteParty, useParty, usePartySearch, useUpdateParty } from "@/lib/queries";
+import {
+  useCreateParty,
+  useDeleteParty,
+  useParty,
+  usePartySearch,
+  useUpdateParty,
+} from "@/lib/queries";
 
 const SELECT =
   "w-full rounded-md border border-line bg-card px-3 py-2 text-sm outline-none focus:border-forest";
@@ -15,6 +21,7 @@ const kindLabel = (kind: string) => ENTITY_KINDS.find((k) => k.value === kind)?.
 export function People() {
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
   const partyParam = Number(params.get("party"));
   const caseParam = Number(params.get("case"));
   const partyId = Number.isInteger(partyParam) && partyParam > 0 ? partyParam : undefined;
@@ -32,7 +39,12 @@ export function People() {
 
   return (
     <div>
-      <h1 className="font-display text-5xl">People &amp; Companies</h1>
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="font-display text-5xl">People &amp; Companies</h1>
+        <Button variant="primary" onClick={() => setCreating(true)}>
+          + New record
+        </Button>
+      </div>
       <p className="mt-2 text-muted">
         Every person and organization you have recorded, across all case files. Names, types,
         aliases and descriptions are visible here for all records.
@@ -56,7 +68,10 @@ export function People() {
             {(rows ?? []).map((r) => (
               <li key={r.id}>
                 <button
-                  onClick={() => select(r.id)}
+                  onClick={() => {
+                    setCreating(false);
+                    select(r.id);
+                  }}
                   className={`w-full rounded-md px-3 py-2 text-left ${
                     r.id === partyId ? "bg-forest text-white" : "hover:bg-sage"
                   }`}
@@ -85,7 +100,15 @@ export function People() {
         </div>
 
         <div>
-          {partyId === undefined ? (
+          {creating ? (
+            <NewPartyForm
+              onCancel={() => setCreating(false)}
+              onOpen={(id) => {
+                setCreating(false);
+                select(id);
+              }}
+            />
+          ) : partyId === undefined ? (
             <Card className="p-8 text-center text-muted">
               Select a person or company to see its details.
             </Card>
@@ -103,6 +126,103 @@ export function People() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Creates a record in the directory only; linking it to a case happens later, from a case. */
+function NewPartyForm({
+  onCancel,
+  onOpen,
+}: {
+  onCancel: () => void;
+  onOpen: (id: number) => void;
+}) {
+  const [kind, setKind] = useState("organization");
+  const [name, setName] = useState("");
+  const [aliases, setAliases] = useState("");
+  const [description, setDescription] = useState("");
+  const [shared, setShared] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const create = useCreateParty();
+
+  const typed = name.trim();
+  const { data: found } = usePartySearch(useDeferredValue(typed), undefined, 5);
+  const sameName = (found ?? []).filter((p) => p.name.toLowerCase() === typed.toLowerCase());
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const id = await create.mutateAsync({ kind, name, aliases, description, shared });
+      onOpen(id);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <form onSubmit={submit} className="space-y-3">
+        <h2 className="font-display text-2xl">New person or company</h2>
+        <div>
+          <Label>Type</Label>
+          <select value={kind} onChange={(e) => setKind(e.target.value)} className={SELECT}>
+            {ENTITY_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>
+                {k.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Name</Label>
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+          {sameName.length > 0 && (
+            <div className="mt-2 rounded-md bg-sand p-3 text-sm">
+              Already recorded:
+              <ul className="mt-1 space-y-0.5">
+                {sameName.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className="text-left underline"
+                      onClick={() => onOpen(p.id)}
+                    >
+                      {p.name}
+                      {p.description ? ` — ${p.description}` : ""}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div>
+          <Label>Aliases</Label>
+          <Input value={aliases} onChange={(e) => setAliases(e.target.value)} />
+        </div>
+        <div>
+          <Label>Description</Label>
+          <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <p className="mt-1.5 text-xs text-muted">
+            Visible in every case file. Don't put sensitive case details here.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
+          Show which cases this appears in
+        </label>
+        {error && <p className="text-sm text-alert">{error}</p>}
+        <div className="flex gap-2">
+          <Button type="submit" variant="primary" disabled={!typed || create.isPending}>
+            {sameName.length > 0 ? `Create another “${typed}”` : "Create"}
+          </Button>
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }
 
