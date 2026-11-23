@@ -2,17 +2,22 @@
 
 Local-first Tauri 2 desktop app for investigative journalists, researchers and investigators: case files, sources, evidence uploads, an article/note editor, lead inbox, connections graph, research dashboard. Feels like Notion + Obsidian. The repo directory is still called `leadtrail` (from the scaffold); the product is "Fieldnotes".
 
-## Status: all 11 planned slices are built; nothing has been tested in the running app
+## Status: all 11 planned slices are built and manually smoke-tested
 
-Verification so far is only `pnpm build` (tsc + vite) and `cargo test` (23 passing). `pnpm tauri dev` launched cleanly with no Rust errors, but **no UI has been exercised by a human or by us**. The next job is a manual smoke test and fixing what breaks, not new features.
+Verification: `pnpm build` (tsc + vite), `cargo test` (23 passing), and a manual smoke test in `pnpm tauri dev` (2026-11-23) of the five riskiest flows. All passed:
 
-Smoke-test order (riskiest first):
+1. Editor: `[[` picker (filters as you type, inserts a chip), `/` slash menu, links show up on the linked note after save.
+2. Connections: entities, edges, node drag; position persists after navigating away.
+3. ⌘K search: partial title, text inside a note body, and a renamed note's new title.
+4. Backup → Restore: DB and evidence files come back. The backup zip holds `manifest.json`, `fieldnotes.db` and `vault/evidence/...` (evidence only appears if files were uploaded; `manifest.json` has an `evidence_files` count).
+5. Publication queue: status changes; Markdown, HTML and PDF export all keep formatting.
 
-1. Editor: type `[[` (note/source picker) and `/` (slash menu) in a note.
-2. Connections: add two entities, connect them, drag a node, navigate away and back; the position must persist.
-3. ⌘K search finds a note by partial title; Enter opens it.
-4. Settings → Back up…, then Restore from backup… (app restarts; data intact; a `pre-restore-*` folder appears in the app data dir).
-5. Publication queue: article status changes; Markdown/HTML export; PDF opens a print view in the browser.
+Open issues from the smoke test:
+- **Restore relaunch crashes in dev.** After Restore, `app.restart()` relaunches the binary and the new process aborts (SIGABRT) about a second later, inside an uncaught Objective-C exception in an Apple Event handler (tao/AppKit; no frames from our code). Data is restored correctly. Seen on macOS 27.0 launching from the VS Code terminal. Not yet checked in a built `.app` (`pnpm tauri build --debug`). If it also crashes there, replace `app.restart()` in `backup::restore_backup` with `app.exit(0)` and a "reopen Fieldnotes" message.
+- Not yet confirmed: that the `pre-restore-*` folder appears in the app data dir after a restore.
+- Not exercised: restoring an invalid zip (should be refused with data untouched; covered only by the `rejects_bad_archives` Rust test).
+
+Next planned work: link people and businesses across cases (entities are currently per case). Needs a design pass first.
 
 ## Commands
 
