@@ -269,6 +269,7 @@ function Workspace({ caseId }: { caseId: number }) {
         {entity ? (
           <EntityPanel
             key={entity.id}
+            caseId={caseId}
             entity={entity}
             graph={graph}
             onSelectRelationship={(id) => setSelection({ kind: "edge", id })}

@@ -6,7 +6,7 @@ import {
   type DocKind,
   type DocStatus,
   type DocSave,
-  type EntityInput,
+  type PartyInput,
   type LeadInput,
   type LeadUpdate,
   type QuestionInput,
@@ -43,12 +43,42 @@ function useGraphMutation<V, R>(fn: (v: V) => Promise<R>) {
   });
 }
 
-export const useCreateEntity = () =>
-  useGraphMutation((v: { caseId: number; input: EntityInput }) =>
-    api.createEntity(v.caseId, v.input),
-  );
 export const useUpdateEntity = () =>
-  useGraphMutation((v: { id: number; input: EntityInput }) => api.updateEntity(v.id, v.input));
+  useGraphMutation((v: { id: number; notes: string }) => api.updateEntity(v.id, v.notes));
+
+export const usePartySearch = (query: string, caseId: number | undefined, limit?: number) =>
+  useQuery({
+    queryKey: ["parties", "search", query, caseId, limit],
+    queryFn: () => api.searchParties(query, caseId, limit),
+  });
+export const useParty = (id: number | undefined, caseId: number | undefined) =>
+  useQuery({
+    queryKey: ["parties", "detail", id, caseId],
+    queryFn: () => api.getParty(id!, caseId),
+    enabled: id !== undefined,
+  });
+
+/** Party edits change names copied into involvements, so refresh parties, graph and cases. */
+function usePartyMutation<V, R>(fn: (v: V) => Promise<R>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["parties"] });
+      qc.invalidateQueries({ queryKey: ["graph"] });
+      qc.invalidateQueries({ queryKey: ["cases"] });
+    },
+  });
+}
+export const useLinkParty = () =>
+  usePartyMutation((v: { caseId: number; partyId: number }) => api.linkParty(v.caseId, v.partyId));
+export const useCreatePartyAndLink = () =>
+  usePartyMutation((v: { caseId: number; input: PartyInput }) =>
+    api.createPartyAndLink(v.caseId, v.input),
+  );
+export const useUpdateParty = () =>
+  usePartyMutation((v: { id: number; input: PartyInput }) => api.updateParty(v.id, v.input));
+export const useDeleteParty = () => usePartyMutation((id: number) => api.deleteParty(id));
 export const useDeleteEntity = () => useGraphMutation((id: number) => api.deleteEntity(id));
 export const useCreateRelationship = () =>
   useGraphMutation((v: { caseId: number; input: RelationshipInput }) =>
