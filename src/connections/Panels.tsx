@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input, Label, Textarea } from "@/components/ui/Field";
@@ -6,7 +7,6 @@ import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import {
   ENTITY_KINDS,
   type Entity,
-  type EntityKind,
   type Graph,
   type Relationship,
   type Source,
@@ -14,9 +14,11 @@ import {
 import {
   useDeleteEntity,
   useDeleteRelationship,
+  useParty,
   useRemoveEvidence,
   useSetEvidence,
   useUpdateEntity,
+  useUpdateParty,
   useUpdateRelationship,
 } from "@/lib/queries";
 
@@ -46,30 +48,55 @@ function PanelTitle({ children }: { children: React.ReactNode }) {
 }
 
 export function EntityPanel({
+  caseId,
   entity,
   graph,
   onSelectRelationship,
   onConnect,
   onDeleted,
 }: {
+  caseId: number;
   entity: Entity;
   graph: Graph;
   onSelectRelationship: (id: number) => void;
   onConnect: () => void;
   onDeleted: () => void;
 }) {
-  const [kind, setKind] = useState<EntityKind>(entity.kind);
+  const { data: party } = useParty(entity.party_id, caseId);
+  const [kind, setKind] = useState<string>(entity.kind);
   const [name, setName] = useState(entity.name);
+  const [aliases, setAliases] = useState("");
+  const [description, setDescription] = useState("");
   const [notes, setNotes] = useState(entity.notes);
-  const update = useUpdateEntity();
+  const [loaded, setLoaded] = useState(false);
+  const updateParty = useUpdateParty();
+  const updateEntity = useUpdateEntity();
   const del = useDeleteEntity();
   const { error, run } = useAction();
+
+  // Fill identity fields once from the party record (the panel is keyed by entity).
+  useEffect(() => {
+    if (party && !loaded) {
+      setKind(party.kind);
+      setName(party.name);
+      setAliases(party.aliases);
+      setDescription(party.description);
+      setLoaded(true);
+    }
+  }, [party, loaded]);
 
   const byId = new Map(graph.entities.map((e) => [e.id, e]));
   const touching = graph.relationships.filter(
     (r) => r.from_id === entity.id || r.to_id === entity.id,
   );
-  const dirty = kind !== entity.kind || name !== entity.name || notes !== entity.notes;
+  const identityDirty =
+    !!party &&
+    (kind !== party.kind ||
+      name !== party.name ||
+      aliases !== party.aliases ||
+      description !== party.description);
+  const notesDirty = notes !== entity.notes;
+  const pending = updateParty.isPending || updateEntity.isPending;
 
   return (
     <div className="space-y-5">
@@ -78,16 +105,20 @@ export function EntityPanel({
         className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          run(() => update.mutateAsync({ id: entity.id, input: { kind, name, notes } }));
+          run(async () => {
+            if (identityDirty && party) {
+              await updateParty.mutateAsync({
+                id: party.id,
+                input: { kind, name, aliases, description, shared: party.shared },
+              });
+            }
+            if (notesDirty) await updateEntity.mutateAsync({ id: entity.id, notes });
+          });
         }}
       >
         <div>
           <Label>Type</Label>
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as EntityKind)}
-            className={SELECT}
-          >
+          <select value={kind} onChange={(e) => setKind(e.target.value)} className={SELECT}>
             {ENTITY_KINDS.map((k) => (
               <option key={k.value} value={k.value}>
                 {k.label}
@@ -100,17 +131,40 @@ export function EntityPanel({
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div>
+          <Label>Aliases</Label>
+          <Input value={aliases} onChange={(e) => setAliases(e.target.value)} />
+        </div>
+        <div>
+          <Label>Description</Label>
+          <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <p className="mt-1.5 text-xs text-muted">
+            Visible in every case file. Don't put sensitive case details here.
+          </p>
+        </div>
+        <p className="text-xs text-muted">
+          Changes to type, name, aliases and description apply in every case file that uses this
+          record.
+        </p>
+        <div>
           <Label>Notes</Label>
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
-        <Button
-          type="submit"
-          variant="primary"
-          className={SMALL}
-          disabled={!dirty || !name.trim() || update.isPending}
-        >
-          Save changes
-        </Button>
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="submit"
+            variant="primary"
+            className={SMALL}
+            disabled={!loaded || (!identityDirty && !notesDirty) || !name.trim() || pending}
+          >
+            Save changes
+          </Button>
+          <Link
+            to={`/people?party=${entity.party_id}&case=${caseId}`}
+            className="text-xs text-forest hover:underline"
+          >
+            Open in People &amp; Companies
+          </Link>
+        </div>
       </form>
 
       <div>

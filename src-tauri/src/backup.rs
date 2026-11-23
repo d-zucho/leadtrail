@@ -355,4 +355,32 @@ mod tests {
         assert!(stage_restore(&d.join("dmg.zip"), &d).is_err());
         assert!(!d.join(STAGING).exists(), "failed staging is cleaned up");
     }
+
+    #[test]
+    fn restoring_a_v8_backup_migrates_forward() {
+        let d = scratch("v8");
+        let db_path = d.join("old.db");
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            crate::db::migrate_to(&conn, 8).unwrap();
+            conn.execute_batch(
+                "INSERT INTO cases(id,code,title) VALUES (1,'FN-001','Old');
+                 INSERT INTO entities(case_id,kind,name) VALUES (1,'person','Maya');",
+            )
+            .unwrap();
+        }
+        let zip_path = d.join("v8.zip");
+        zip_with(
+            &zip_path,
+            &[(MANIFEST, br#"{"app":"fieldnotes","schema_version":8}"#), (DB_ENTRY, &fs::read(&db_path).unwrap())],
+        );
+        let live = scratch("v8-live");
+        stage_restore(&zip_path, &live).unwrap();
+        assert!(apply_pending(&live).unwrap());
+        let conn = crate::db::open(&live.join("fieldnotes.db")).unwrap();
+        let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+        assert_eq!(v, 9);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
 }

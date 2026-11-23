@@ -1,12 +1,27 @@
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
-import { ENTITY_KINDS, type Entity, type EntityKind } from "@/lib/api";
-import { useCreateEntity, useCreateRelationship } from "@/lib/queries";
+import { PartyPicker } from "@/connections/PartyPicker";
+import { ENTITY_KINDS, type Entity, type EntityKind, type PartyRow } from "@/lib/api";
+import {
+  useCreatePartyAndLink,
+  useCreateRelationship,
+  useLinkParty,
+  usePartySearch,
+  useUpdateEntity,
+} from "@/lib/queries";
 
 const SELECT =
   "w-full rounded-md border border-line bg-card px-3 py-2 text-sm outline-none focus:border-forest";
+
+/** Option label for an entity: name plus description, or `#id` when it would be ambiguous. */
+export function entityLabel(e: Entity, all: Entity[]): string {
+  if (e.description) return `${e.name} — ${e.description}`;
+  const same = (o: Entity) => o.id !== e.id && o.name.trim().toLowerCase() === e.name.trim().toLowerCase();
+  const dup = all.some(same);
+  return dup ? `${e.name} (#${e.party_id})` : e.name;
+}
 
 export function EntityModal({
   caseId,
@@ -19,21 +34,44 @@ export function EntityModal({
 }) {
   const [kind, setKind] = useState<EntityKind>("organization");
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const create = useCreateEntity();
+  const link = useLinkParty();
+  const create = useCreatePartyAndLink();
+  const updateEntity = useUpdateEntity();
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function pick(party: PartyRow) {
     setError(null);
     try {
-      const id = await create.mutateAsync({ caseId, input: { kind, name, notes } });
+      const id = await link.mutateAsync({ caseId, partyId: party.id });
+      if (notes.trim()) await updateEntity.mutateAsync({ id, notes });
       onCreated(id);
       onClose();
     } catch (err) {
       setError(String(err));
     }
   }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const id = await create.mutateAsync({ caseId, input: { kind, name, description } });
+      if (notes.trim()) await updateEntity.mutateAsync({ id, notes });
+      onCreated(id);
+      onClose();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  const deferredName = useDeferredValue(name);
+  const { data: matches } = usePartySearch(deferredName, caseId, 8);
+  const typed = name.trim().toLowerCase();
+  const hasSameName = typed !== "" && (matches ?? []).some((p) => p.name.trim().toLowerCase() === typed);
+
+  const busy = link.isPending || create.isPending || updateEntity.isPending;
 
   return (
     <Modal title="Add an entity" onClose={onClose}>
@@ -55,6 +93,14 @@ export function EntityModal({
         <div>
           <Label>Name</Label>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+          <PartyPicker caseId={caseId} query={name} onPick={pick} />
+        </div>
+        <div>
+          <Label>Description</Label>
+          <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <p className="mt-1.5 text-xs text-muted">
+            Visible in every case file. Don't put sensitive case details here.
+          </p>
         </div>
         <div>
           <Label>Notes</Label>
@@ -65,12 +111,8 @@ export function EntityModal({
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={!name.trim() || create.isPending}
-          >
-            Add entity
+          <Button type="submit" variant="primary" disabled={!name.trim() || busy}>
+            {hasSameName ? `Create another “${name.trim()}”` : "Create new"}
           </Button>
         </div>
       </form>
@@ -134,7 +176,7 @@ export function ConnectModal({
             <select value={from} onChange={(e) => setFrom(Number(e.target.value))} className={SELECT}>
               {entities.map((e) => (
                 <option key={e.id} value={e.id}>
-                  {e.name}
+                  {entityLabel(e, entities)}
                 </option>
               ))}
             </select>
@@ -151,7 +193,7 @@ export function ConnectModal({
                 .filter((e) => e.id !== from)
                 .map((e) => (
                   <option key={e.id} value={e.id}>
-                    {e.name}
+                    {entityLabel(e, entities)}
                   </option>
                 ))}
             </select>

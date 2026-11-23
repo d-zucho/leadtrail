@@ -226,6 +226,8 @@ export interface Entity {
   kind: EntityKind;
   name: string;
   notes: string;
+  description: string;
+  party_id: number;
   x: number | null;
   y: number | null;
 }
@@ -254,10 +256,42 @@ export interface Graph {
   relationships: Relationship[];
 }
 
-export interface EntityInput {
-  kind: EntityKind;
+export interface PartyInput {
+  kind: string;
   name: string;
-  notes?: string;
+  aliases?: string;
+  description?: string;
+  shared?: boolean;
+}
+
+export interface PartyRow {
+  id: number;
+  kind: string;
+  name: string;
+  aliases: string;
+  description: string;
+  shared: boolean;
+  in_this_case: boolean;
+  other_case_count: number | null;
+}
+
+export interface CaseRef {
+  case_id: number;
+  code: string;
+  title: string;
+  connections: number;
+}
+
+export interface PartyDetail {
+  id: number;
+  kind: string;
+  name: string;
+  aliases: string;
+  description: string;
+  shared: boolean;
+  in_this_case: CaseRef | null;
+  /** Non-null only when the record is shared. */
+  cases: CaseRef[] | null;
 }
 
 export interface RelationshipInput {
@@ -267,7 +301,7 @@ export interface RelationshipInput {
   notes?: string;
 }
 
-export type HitKind = "case" | "source" | "lead" | "document" | "question" | "entity";
+export type HitKind = "case" | "source" | "lead" | "document" | "question" | "entity" | "party";
 
 export interface Hit {
   kind: HitKind;
@@ -294,10 +328,17 @@ export const api = {
   search: (query: string) => invoke<Hit[]>("search", { query }),
 
   getGraph: (caseId: number) => invoke<Graph>("get_graph", { caseId }),
-  createEntity: (caseId: number, input: EntityInput) =>
-    invoke<number>("create_entity", { caseId, input }),
-  updateEntity: (id: number, input: EntityInput) =>
-    invoke<void>("update_entity", { id, input }),
+  updateEntity: (id: number, notes: string) => invoke<void>("update_entity", { id, notes }),
+  searchParties: (query: string, caseId?: number, limit?: number) =>
+    invoke<PartyRow[]>("search_parties", { query, caseId, limit }),
+  getParty: (id: number, caseId?: number) => invoke<PartyDetail>("get_party", { id, caseId }),
+  createParty: (input: PartyInput) => invoke<number>("create_party", { input }),
+  updateParty: (id: number, input: PartyInput) => invoke<void>("update_party", { id, input }),
+  deleteParty: (id: number) => invoke<void>("delete_party", { id }),
+  linkParty: (caseId: number, partyId: number) =>
+    invoke<number>("link_party", { caseId, partyId }),
+  createPartyAndLink: (caseId: number, input: PartyInput) =>
+    invoke<number>("create_party_and_link", { caseId, input }),
   moveEntity: (id: number, x: number, y: number) => invoke<void>("move_entity", { id, x, y }),
   deleteEntity: (id: number) => invoke<void>("delete_entity", { id }),
   createRelationship: (caseId: number, input: RelationshipInput) =>

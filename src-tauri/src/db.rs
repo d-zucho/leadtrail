@@ -164,6 +164,36 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE documents ADD COLUMN published_at TEXT;
     CREATE INDEX documents_status ON documents(kind, status);
 "#,
+    r#"
+    CREATE TABLE parties (
+        id INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        aliases TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        shared INTEGER NOT NULL DEFAULT 0 CHECK (shared IN (0,1)),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO parties (id, kind, name) SELECT id, kind, name FROM entities;
+
+    ALTER TABLE entities ADD COLUMN party_id INTEGER REFERENCES parties(id);
+    UPDATE entities SET party_id = id;
+    DROP INDEX entities_unique;
+    CREATE UNIQUE INDEX entities_case_party ON entities(case_id, party_id);
+    CREATE INDEX entities_party ON entities(party_id);
+
+    CREATE TRIGGER entities_require_party BEFORE INSERT ON entities WHEN new.party_id IS NULL
+    BEGIN SELECT RAISE(ABORT, 'an entity must reference a party'); END;
+    CREATE TRIGGER parties_sync_entities AFTER UPDATE OF kind, name ON parties
+    BEGIN UPDATE entities SET kind = new.kind, name = new.name WHERE party_id = new.id; END;
+
+    INSERT INTO search(rowid, title, body, kind, ref_id, case_id)
+        SELECT id * 8 + 7, name, aliases || ' ' || description, 'party', id, NULL FROM parties;
+    CREATE TRIGGER search_parties_ai AFTER INSERT ON parties BEGIN INSERT INTO search(rowid, title, body, kind, ref_id, case_id) VALUES (new.id * 8 + 7, new.name, new.aliases || ' ' || new.description, 'party', new.id, NULL); END;
+    CREATE TRIGGER search_parties_au AFTER UPDATE ON parties BEGIN DELETE FROM search WHERE rowid = old.id * 8 + 7; INSERT INTO search(rowid, title, body, kind, ref_id, case_id) VALUES (new.id * 8 + 7, new.name, new.aliases || ' ' || new.description, 'party', new.id, NULL); END;
+    CREATE TRIGGER search_parties_ad AFTER DELETE ON parties BEGIN DELETE FROM search WHERE rowid = old.id * 8 + 7; END;
+"#,
 ];
 
 /// The schema version this build understands.
@@ -180,12 +210,24 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
 }
 
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    migrate_to(conn, MIGRATIONS.len())
+}
+
+/// Applies pending migrations up to and including `target` (a schema version).
+pub(crate) fn migrate_to(conn: &Connection, target: usize) -> rusqlite::Result<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
-        conn.execute_batch(sql)?;
-        conn.pragma_update(None, "user_version", i as i64 + 1)?;
+    for (i, sql) in MIGRATIONS.iter().enumerate().take(target).skip(current as usize) {
+        apply(conn, sql, i as i64 + 1)?;
     }
     Ok(())
+}
+
+/// Runs one migration and its version bump atomically: a failure leaves the DB at the previous version.
+fn apply(conn: &Connection, sql: &str, version: i64) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(sql)?;
+    tx.pragma_update(None, "user_version", version)?;
+    tx.commit()
 }
 
 #[tauri::command]
@@ -195,4 +237,109 @@ pub fn app_info(db: tauri::State<Db>) -> Result<String, String> {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|e| e.to_string())?;
     Ok(format!("schema v{v}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v8() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        migrate_to(&conn, 8).unwrap();
+        conn
+    }
+
+    #[test]
+    fn a_failing_migration_rolls_back_completely() {
+        let conn = v8();
+        let r = apply(&conn, "CREATE TABLE half_done (id INTEGER); INSERT INTO no_such_table VALUES (1);", 9);
+        assert!(r.is_err());
+        assert_eq!(count(&conn, "PRAGMA user_version"), 8);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'half_done'"), 0);
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn v9_backfills_one_party_per_entity_and_keeps_the_graph() {
+        let conn = v8();
+        conn.execute_batch(
+            "INSERT INTO cases (id, code, title) VALUES (1, 'A', 'Case A');
+             INSERT INTO entities (id, case_id, kind, name, x, y) VALUES
+                (1, 1, 'organization', 'Northbank', 10.5, 20.5),
+                (2, 1, 'public_body', 'Water dept', NULL, NULL),
+                (3, 1, 'person', 'Maya', NULL, NULL);
+             INSERT INTO sources (id, case_id, kind, title) VALUES (10, 1, 'record', 'Award notice');
+             INSERT INTO relationships (id, case_id, from_id, to_id, label) VALUES (1, 1, 1, 2, 'funds');
+             INSERT INTO relationship_sources (relationship_id, source_id) VALUES (1, 10);",
+        )
+        .unwrap();
+        migrate_to(&conn, 9).unwrap();
+
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM parties"), 3);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM entities WHERE party_id = id"), 3);
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM entities e JOIN parties p ON p.id = e.party_id WHERE p.name = e.name AND p.kind = e.kind"),
+            3
+        );
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM parties WHERE shared = 0"), 3);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM relationships"), 1);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM relationship_sources"), 1);
+        let (x, y): (f64, f64) = conn.query_row("SELECT x, y FROM entities WHERE id = 1", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((x, y), (10.5, 20.5));
+        assert_eq!(count(&conn, "PRAGMA user_version"), 9);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM search WHERE search MATCH '\"northbank\"*' AND kind='party'"), 1);
+    }
+
+    #[test]
+    fn renaming_a_party_updates_entities_and_search() {
+        let conn = v8();
+        conn.execute_batch(
+            "INSERT INTO cases (id, code, title) VALUES (1, 'A', 'Case A');
+             INSERT INTO entities (id, case_id, kind, name) VALUES (1, 1, 'organization', 'Northbank');",
+        )
+        .unwrap();
+        migrate_to(&conn, 9).unwrap();
+        conn.execute("UPDATE parties SET name='Renamed', kind='person' WHERE id=1", []).unwrap();
+
+        let (k, n): (String, String) = conn
+            .query_row("SELECT kind, name FROM entities WHERE party_id = 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((k.as_str(), n.as_str()), ("person", "Renamed"));
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM search WHERE search MATCH '\"renamed\"*' AND kind='entity'"), 1);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM search WHERE search MATCH '\"renamed\"*' AND kind='party'"), 1);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM search WHERE search MATCH '\"northbank\"*'"), 0);
+    }
+
+    #[test]
+    fn entity_insert_requires_a_party() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        migrate(&conn).unwrap();
+        conn.execute("INSERT INTO cases (id, code, title) VALUES (1, 'A', 'Case A')", []).unwrap();
+        assert!(conn.execute("INSERT INTO entities (case_id, kind, name) VALUES (1,'person','X')", []).is_err());
+        conn.execute("INSERT INTO parties (id, kind, name) VALUES (1, 'person', 'X')", []).unwrap();
+        conn.execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (1,'person','X',1)", []).unwrap();
+    }
+
+    #[test]
+    fn two_parties_may_share_a_name_in_one_case_but_one_party_links_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO cases (id, code, title) VALUES (1, 'A', 'Case A');
+             INSERT INTO parties (id, kind, name) VALUES (1, 'person', 'John Smith'), (2, 'person', 'John Smith');",
+        )
+        .unwrap();
+        for pid in [1, 2] {
+            conn.execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (1,'person','John Smith',?1)", [pid]).unwrap();
+        }
+        assert!(conn
+            .execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (1,'person','John Smith',1)", [])
+            .is_err());
+    }
 }

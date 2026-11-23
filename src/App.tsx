@@ -6,6 +6,7 @@ import { CaseDetail } from "@/routes/CaseDetail";
 import { Cases } from "@/routes/Cases";
 import { Dashboard } from "@/routes/Dashboard";
 import { Inbox } from "@/routes/Inbox";
+import { People } from "@/routes/People";
 import { Publication } from "@/routes/Publication";
 import { Settings } from "@/routes/Settings";
 import { Sources } from "@/routes/Sources";
@@ -47,6 +48,7 @@ export default function App() {
                 </Suspense>
               }
             />
+            <Route path="people" element={<People />} />
             <Route path="settings" element={<Settings />} />
             <Route path="publication" element={<Publication />} />
           </Route>

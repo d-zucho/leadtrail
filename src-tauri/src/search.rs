@@ -21,7 +21,7 @@ pub struct Hit {
 
 /// Turns free text into a safe FTS5 query: every word becomes a quoted prefix
 /// term, all of which must match. Returns None when nothing searchable remains.
-fn to_match(q: &str) -> Option<String> {
+pub(crate) fn to_match(q: &str) -> Option<String> {
     let terms: Vec<String> = q
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
@@ -90,7 +90,8 @@ mod tests {
             "INSERT INTO documents(case_id,title,content_text) VALUES (1,'Draft','The port authority awarded Meridian a contract')",
             [],
         ).unwrap();
-        c.execute("INSERT INTO entities(case_id,kind,name) VALUES (1,'person','Dana Okafor')", []).unwrap();
+        c.execute("INSERT INTO parties(id,kind,name) VALUES (1,'person','Dana Okafor')", []).unwrap();
+        c.execute("INSERT INTO entities(case_id,kind,name,party_id) VALUES (1,'person','Dana Okafor',1)", []).unwrap();
 
         let hits = run(&c, "meridi", 10).unwrap();
         assert_eq!(hits.len(), 1);
@@ -99,7 +100,8 @@ mod tests {
         assert_eq!(hits[0].case_code.as_deref(), Some("FN-001"));
 
         // title-only match across kinds, accents folded
-        assert_eq!(run(&c, "okafor", 10).unwrap()[0].kind, "entity");
+        let kinds: Vec<String> = run(&c, "okafor", 10).unwrap().into_iter().map(|h| h.kind).collect();
+        assert!(kinds.contains(&"entity".to_string()) && kinds.contains(&"party".to_string()));
         assert_eq!(run(&c, "harbor", 10).unwrap()[0].kind, "case");
 
         // update replaces the old text
@@ -110,7 +112,10 @@ mod tests {
         // deleting the case cascades out of the index
         c.execute("DELETE FROM cases WHERE id=1", []).unwrap();
         assert!(run(&c, "something", 10).unwrap().is_empty());
-        assert!(run(&c, "okafor", 10).unwrap().is_empty());
+        // the entity goes with the case; the global party stays
+        let hits = run(&c, "okafor", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].kind, "party");
     }
 
     #[test]

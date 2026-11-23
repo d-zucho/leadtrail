@@ -4,15 +4,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
 
-const KINDS: &[&str] = &["person", "organization", "public_body"];
-
 #[derive(Serialize)]
 pub struct Entity {
     pub id: i64,
     pub case_id: i64,
+    pub party_id: i64,
     pub kind: String,
     pub name: String,
     pub notes: String,
+    pub description: String,
     pub x: Option<f64>,
     pub y: Option<f64>,
 }
@@ -42,13 +42,6 @@ pub struct Relationship {
 pub struct Graph {
     pub entities: Vec<Entity>,
     pub relationships: Vec<Relationship>,
-}
-
-#[derive(Deserialize)]
-pub struct EntityInput {
-    pub kind: String,
-    pub name: String,
-    pub notes: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -90,7 +83,8 @@ fn exists_in_case(conn: &Connection, table: &str, id: i64, case_id: i64) -> bool
 
 pub fn load_graph(conn: &Connection, case_id: i64) -> rusqlite::Result<Graph> {
     let mut stmt = conn.prepare(
-        "SELECT id, case_id, kind, name, notes, x, y FROM entities WHERE case_id = ?1 ORDER BY id",
+        "SELECT e.id, e.case_id, e.kind, e.name, e.notes, e.x, e.y, e.party_id, p.description \
+         FROM entities e JOIN parties p ON p.id = e.party_id WHERE e.case_id = ?1 ORDER BY e.id",
     )?;
     let entities = stmt
         .query_map([case_id], |r| {
@@ -102,6 +96,8 @@ pub fn load_graph(conn: &Connection, case_id: i64) -> rusqlite::Result<Graph> {
                 notes: r.get(4)?,
                 x: r.get(5)?,
                 y: r.get(6)?,
+                party_id: r.get(7)?,
+                description: r.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -220,7 +216,7 @@ pub fn put_evidence(
     Ok(())
 }
 
-fn touch_case(conn: &Connection, case_id: i64) -> Result<(), String> {
+pub(crate) fn touch_case(conn: &Connection, case_id: i64) -> Result<(), String> {
     conn.execute(
         "UPDATE cases SET updated_at = datetime('now') WHERE id = ?1",
         [case_id],
@@ -235,47 +231,21 @@ pub fn get_graph(db: State<Db>, case_id: i64) -> Result<Graph, String> {
     load_graph(&conn, case_id).map_err(err)
 }
 
-#[tauri::command]
-pub fn create_entity(db: State<Db>, case_id: i64, input: EntityInput) -> Result<i64, String> {
-    if !KINDS.contains(&input.kind.as_str()) {
-        return Err(format!("invalid entity kind: {}", input.kind));
-    }
-    let name = input.name.trim();
-    if name.is_empty() {
-        return Err("a name is required".into());
-    }
-    let conn = db.0.lock().map_err(err)?;
-    conn.query_row("SELECT 1 FROM cases WHERE id = ?1", [case_id], |_| Ok(()))
-        .map_err(|_| "case file not found".to_string())?;
-    conn.execute(
-        "INSERT INTO entities (case_id, kind, name, notes) VALUES (?1, ?2, ?3, ?4)",
-        params![case_id, input.kind, name, input.notes.unwrap_or_default().trim()],
-    )
-    .map_err(|e| friendly(e, "this case file already has that entity"))?;
-    touch_case(&conn, case_id)?;
-    Ok(conn.last_insert_rowid())
-}
-
-#[tauri::command]
-pub fn update_entity(db: State<Db>, id: i64, input: EntityInput) -> Result<(), String> {
-    if !KINDS.contains(&input.kind.as_str()) {
-        return Err(format!("invalid entity kind: {}", input.kind));
-    }
-    let name = input.name.trim();
-    if name.is_empty() {
-        return Err("a name is required".into());
-    }
-    let conn = db.0.lock().map_err(err)?;
+/// Notes are the only per-case field on an involvement; name and kind belong to the record.
+pub fn set_notes(conn: &Connection, id: i64, notes: &str) -> Result<(), String> {
     let n = conn
-        .execute(
-            "UPDATE entities SET kind = ?1, name = ?2, notes = ?3 WHERE id = ?4",
-            params![input.kind, name, input.notes.unwrap_or_default().trim(), id],
-        )
-        .map_err(|e| friendly(e, "this case file already has that entity"))?;
+        .execute("UPDATE entities SET notes = ?1 WHERE id = ?2", params![notes.trim(), id])
+        .map_err(err)?;
     if n == 0 {
         return Err("entity not found".into());
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn update_entity(db: State<Db>, id: i64, notes: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(err)?;
+    set_notes(&conn, id, &notes)
 }
 
 /// Remembers where a node was dragged to.
@@ -381,9 +351,11 @@ mod tests {
         let conn = db::open(std::path::Path::new(":memory:")).unwrap();
         conn.execute_batch(
             "INSERT INTO cases (id, code, title) VALUES (1, 'A', 'Case A'), (2, 'B', 'Case B');
-             INSERT INTO entities (id, case_id, kind, name) VALUES
-                (1, 1, 'organization', 'Northbank'), (2, 1, 'public_body', 'Water dept'),
-                (3, 2, 'person', 'Maya');
+             INSERT INTO parties (id, kind, name) VALUES
+                (1, 'organization', 'Northbank'), (2, 'public_body', 'Water dept'), (3, 'person', 'Maya');
+             INSERT INTO entities (id, case_id, kind, name, party_id) VALUES
+                (1, 1, 'organization', 'Northbank', 1), (2, 1, 'public_body', 'Water dept', 2),
+                (3, 2, 'person', 'Maya', 3);
              INSERT INTO sources (id, case_id, kind, title, verification_status) VALUES
                 (10, 1, 'record', 'Award notice', 'verified'), (11, 2, 'note', 'Elsewhere', 'unverified');",
         )
@@ -393,6 +365,17 @@ mod tests {
 
     fn rel(from: i64, to: i64, label: &str) -> RelationshipInput {
         RelationshipInput { from_id: from, to_id: to, label: label.into(), notes: None }
+    }
+
+    #[test]
+    fn load_graph_returns_the_party_description() {
+        let conn = setup();
+        conn.execute("UPDATE parties SET description = 'Treasurer' WHERE id = 3", []).unwrap();
+        conn.execute("INSERT INTO entities (id, case_id, kind, name, party_id) VALUES (4, 1, 'person', 'Maya', 3)", []).unwrap();
+        let g = load_graph(&conn, 1).unwrap();
+        let d = |id: i64| g.entities.iter().find(|e| e.id == id).unwrap().description.clone();
+        assert_eq!(d(4), "Treasurer");
+        assert_eq!(d(1), "");
     }
 
     #[test]
@@ -450,19 +433,31 @@ mod tests {
     }
 
     #[test]
-    fn entity_names_are_unique_per_case_and_kind_ignoring_case() {
+    fn same_party_cannot_be_linked_twice_but_same_name_can_repeat() {
         let conn = setup();
-        let dup = conn.execute(
-            "INSERT INTO entities (case_id, kind, name) VALUES (1, 'organization', 'NORTHBANK')",
-            [],
-        );
-        assert!(dup.is_err());
-        // Same name as a different kind, or in another case, is fine.
+        // Party 1 is already linked to case 1.
         assert!(conn
-            .execute("INSERT INTO entities (case_id, kind, name) VALUES (1, 'person', 'Northbank')", [])
-            .is_ok());
+            .execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (1, 'organization', 'Northbank', 1)", [])
+            .is_err());
+        // A different party with the same name can be linked to the same case.
+        conn.execute("INSERT INTO parties (id, kind, name) VALUES (4, 'organization', 'Northbank')", []).unwrap();
         assert!(conn
-            .execute("INSERT INTO entities (case_id, kind, name) VALUES (2, 'organization', 'Northbank')", [])
+            .execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (1, 'organization', 'Northbank', 4)", [])
             .is_ok());
+        // The same party can be linked to another case.
+        assert!(conn
+            .execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (2, 'organization', 'Northbank', 1)", [])
+            .is_ok());
+    }
+
+    #[test]
+    fn update_entity_only_changes_notes() {
+        let conn = setup();
+        set_notes(&conn, 1, "  hello ").unwrap();
+        let g = load_graph(&conn, 1).unwrap();
+        let e = g.entities.iter().find(|e| e.id == 1).unwrap();
+        assert_eq!((e.notes.as_str(), e.name.as_str(), e.kind.as_str()), ("hello", "Northbank", "organization"));
+        assert_eq!(e.party_id, 1);
+        assert!(set_notes(&conn, 99, "x").is_err());
     }
 }

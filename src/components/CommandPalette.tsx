@@ -18,7 +18,8 @@ const KIND_LABEL: Record<HitKind, string> = {
   lead: "Lead",
   document: "Note",
   question: "Question",
-  entity: "Entity",
+  entity: "In case graph",
+  party: "Person / company",
 };
 
 function destination(h: Hit): string {
@@ -31,6 +32,8 @@ function destination(h: Hit): string {
       return "/inbox";
     case "entity":
       return `/connections?case=${h.case_id}`;
+    case "party":
+      return `/people?party=${h.ref_id}`;
     default:
       return `/cases/${h.case_id}`;
   }
