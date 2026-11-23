@@ -381,9 +381,11 @@ mod tests {
         let conn = db::open(std::path::Path::new(":memory:")).unwrap();
         conn.execute_batch(
             "INSERT INTO cases (id, code, title) VALUES (1, 'A', 'Case A'), (2, 'B', 'Case B');
-             INSERT INTO entities (id, case_id, kind, name) VALUES
-                (1, 1, 'organization', 'Northbank'), (2, 1, 'public_body', 'Water dept'),
-                (3, 2, 'person', 'Maya');
+             INSERT INTO parties (id, kind, name) VALUES
+                (1, 'organization', 'Northbank'), (2, 'public_body', 'Water dept'), (3, 'person', 'Maya');
+             INSERT INTO entities (id, case_id, kind, name, party_id) VALUES
+                (1, 1, 'organization', 'Northbank', 1), (2, 1, 'public_body', 'Water dept', 2),
+                (3, 2, 'person', 'Maya', 3);
              INSERT INTO sources (id, case_id, kind, title, verification_status) VALUES
                 (10, 1, 'record', 'Award notice', 'verified'), (11, 2, 'note', 'Elsewhere', 'unverified');",
         )
@@ -450,19 +452,20 @@ mod tests {
     }
 
     #[test]
-    fn entity_names_are_unique_per_case_and_kind_ignoring_case() {
+    fn same_party_cannot_be_linked_twice_but_same_name_can_repeat() {
         let conn = setup();
-        let dup = conn.execute(
-            "INSERT INTO entities (case_id, kind, name) VALUES (1, 'organization', 'NORTHBANK')",
-            [],
-        );
-        assert!(dup.is_err());
-        // Same name as a different kind, or in another case, is fine.
+        // Party 1 is already linked to case 1.
         assert!(conn
-            .execute("INSERT INTO entities (case_id, kind, name) VALUES (1, 'person', 'Northbank')", [])
+            .execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (1, 'organization', 'Northbank', 1)", [])
+            .is_err());
+        // A different party with the same name can be linked to the same case.
+        conn.execute("INSERT INTO parties (id, kind, name) VALUES (4, 'organization', 'Northbank')", []).unwrap();
+        assert!(conn
+            .execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (1, 'organization', 'Northbank', 4)", [])
             .is_ok());
+        // The same party can be linked to another case.
         assert!(conn
-            .execute("INSERT INTO entities (case_id, kind, name) VALUES (2, 'organization', 'Northbank')", [])
+            .execute("INSERT INTO entities (case_id, kind, name, party_id) VALUES (2, 'organization', 'Northbank', 1)", [])
             .is_ok());
     }
 }
