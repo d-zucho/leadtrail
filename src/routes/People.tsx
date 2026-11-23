@@ -8,6 +8,7 @@ import {
   useCreateParty,
   useDeleteParty,
   useParty,
+  usePartyMentions,
   usePartySearch,
   useUpdateParty,
 } from "@/lib/queries";
@@ -120,6 +121,7 @@ export function People() {
             <PartyEditor
               key={`${detail.id}-${caseId ?? ""}`}
               detail={detail}
+              caseId={caseId}
               onDeleted={() => select(undefined)}
             />
           )}
@@ -226,7 +228,15 @@ function NewPartyForm({
   );
 }
 
-function PartyEditor({ detail, onDeleted }: { detail: PartyDetail; onDeleted: () => void }) {
+function PartyEditor({
+  detail,
+  caseId,
+  onDeleted,
+}: {
+  detail: PartyDetail;
+  caseId: number | undefined;
+  onDeleted: () => void;
+}) {
   // Initialised once per record (the component is keyed), so background refetches
   // never overwrite in-progress edits.
   const [kind, setKind] = useState(detail.kind);
@@ -353,6 +363,8 @@ function PartyEditor({ detail, onDeleted }: { detail: PartyDetail; onDeleted: ()
         )}
       </div>
 
+      <MentionedIn partyId={detail.id} caseId={caseId} shared={detail.cases !== null} />
+
       <div className="border-t border-line pt-4">
         <Button
           variant="danger"
@@ -370,5 +382,54 @@ function PartyEditor({ detail, onDeleted }: { detail: PartyDetail; onDeleted: ()
 
       {error && <p className="text-sm text-alert">{error}</p>}
     </Card>
+  );
+}
+
+function MentionedIn({
+  partyId,
+  caseId,
+  shared,
+}: {
+  partyId: number;
+  caseId: number | undefined;
+  shared: boolean;
+}) {
+  const { data: mentions, error } = usePartyMentions(partyId, caseId);
+  const empty = shared
+    ? "Not mentioned in any note."
+    : caseId !== undefined
+      ? "Not mentioned in this case file's notes."
+      : "Mentions from case files are hidden. Turn on “Show which cases this appears in” to list them.";
+
+  return (
+    <div className="space-y-2 border-t border-line pt-4">
+      <Label>Mentioned in</Label>
+      {error ? (
+        <p className="text-sm text-alert">{String(error)}</p>
+      ) : !mentions ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : mentions.length === 0 ? (
+        <p className="text-sm text-muted">{empty}</p>
+      ) : (
+        <ul className="space-y-1">
+          {mentions.map((m) => (
+            <li key={m.doc_id}>
+              <Link
+                to={`/cases/${m.case_id}/docs/${m.doc_id}`}
+                className="flex items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-sage"
+              >
+                <span>{m.title || "Untitled"}</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
+                  {m.kind}
+                </span>
+                {m.case_code && (
+                  <span className="ml-auto font-mono text-xs text-muted">{m.case_code}</span>
+                )}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

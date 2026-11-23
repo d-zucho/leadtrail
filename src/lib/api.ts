@@ -200,7 +200,7 @@ export interface Backlink {
 }
 
 export interface LinkRef {
-  dst_type: "document" | "source";
+  dst_type: "document" | "source" | "party";
   dst_id: number;
   label: string;
 }
@@ -294,6 +294,14 @@ export interface PartyDetail {
   cases: CaseRef[] | null;
 }
 
+export interface Mention {
+  doc_id: number;
+  case_id: number;
+  case_code: string | null;
+  kind: DocKind;
+  title: string;
+}
+
 export interface RelationshipInput {
   from_id: number;
   to_id: number;
@@ -332,6 +340,8 @@ export const api = {
   searchParties: (query: string, caseId?: number, limit?: number) =>
     invoke<PartyRow[]>("search_parties", { query, caseId, limit }),
   getParty: (id: number, caseId?: number) => invoke<PartyDetail>("get_party", { id, caseId }),
+  listPartyMentions: (partyId: number, caseId?: number) =>
+    invoke<Mention[]>("list_party_mentions", { partyId, caseId }),
   createParty: (input: PartyInput) => invoke<number>("create_party", { input }),
   updateParty: (id: number, input: PartyInput) => invoke<void>("update_party", { id, input }),
   deleteParty: (id: number) => invoke<void>("delete_party", { id }),

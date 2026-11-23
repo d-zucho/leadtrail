@@ -69,19 +69,25 @@ pub fn update_party(conn: &Connection, id: i64, input: &PartyInput) -> Result<()
 }
 
 pub fn delete_party(conn: &Connection, id: i64) -> Result<(), String> {
-    let linked: i64 = conn
+    let e = |e: rusqlite::Error| e.to_string();
+    let tx = conn.unchecked_transaction().map_err(e)?;
+    let linked: i64 = tx
         .query_row("SELECT COUNT(*) FROM entities WHERE party_id = ?1", [id], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
+        .map_err(e)?;
     if linked > 0 {
         return Err("This record is linked to one or more case files. Remove those links first.".into());
     }
-    let n = conn
-        .execute("DELETE FROM parties WHERE id = ?1", [id])
-        .map_err(|e| e.to_string())?;
-    if n == 0 {
+    let exists: i64 = tx
+        .query_row("SELECT COUNT(*) FROM parties WHERE id = ?1", [id], |r| r.get(0))
+        .map_err(e)?;
+    if exists == 0 {
         return Err("record not found".into());
     }
-    Ok(())
+    crate::mentions::detach_party_chips(&tx, id).map_err(e)?;
+    tx.execute("DELETE FROM parties WHERE id = ?1", [id]).map_err(e)?;
+    tx.execute("DELETE FROM links WHERE dst_type = 'party' AND dst_id = ?1", [id])
+        .map_err(e)?;
+    tx.commit().map_err(e)
 }
 
 pub fn search_parties(
@@ -410,6 +416,26 @@ mod tests {
         c.execute("DELETE FROM entities WHERE party_id = ?1", [id]).unwrap();
         delete_party(&c, id).unwrap();
         assert!(search_parties(&c, "", None, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_record_removes_its_mention_links() {
+        let c = conn();
+        let id = create_party(&c, &input("person", "Ann")).unwrap();
+        let other = create_party(&c, &input("person", "Bob")).unwrap();
+        c.execute("INSERT INTO documents (id, case_id, title) VALUES (1, 1, 'n')", []).unwrap();
+        c.execute(
+            "INSERT INTO links (src_doc_id, dst_type, dst_id, label) VALUES (1, 'party', ?1, 'a'), (1, 'party', ?2, 'b'), (1, 'document', ?1, 'c')",
+            params![id, other],
+        )
+        .unwrap();
+        delete_party(&c, id).unwrap();
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM links", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2);
+        let gone: i64 = c
+            .query_row("SELECT COUNT(*) FROM links WHERE dst_type = 'party' AND dst_id = ?1", [id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(gone, 0);
     }
 
     fn case_code(c: &Connection, id: i64) -> String {

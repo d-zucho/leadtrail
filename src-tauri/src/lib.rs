@@ -6,6 +6,7 @@ mod db;
 mod documents;
 mod export;
 mod leads;
+mod mentions;
 mod parties;
 mod questions;
 mod search;
@@ -62,6 +63,7 @@ pub fn run() {
             documents::delete_document,
             documents::list_backlinks,
             documents::list_source_citations,
+            mentions::list_party_mentions,
             questions::list_questions,
             questions::create_question,
             questions::update_question,

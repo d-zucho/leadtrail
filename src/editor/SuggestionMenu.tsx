@@ -98,7 +98,8 @@ export function suggestionRenderer() {
       place(props);
     },
     onUpdate: (props: SuggestionProps<any, any>) => {
-      component?.updateProps(props);
+      // Async pickers re-emit with no items while loading; keep the open list.
+      if (!(props.loading && props.items.length === 0)) component?.updateProps(props);
       place(props);
     },
     onKeyDown: (props: SuggestionKeyDownProps) => {
