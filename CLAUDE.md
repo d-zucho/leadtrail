@@ -7,6 +7,7 @@ Local-first Tauri 2 desktop app for investigative journalists, researchers and i
 Verification so far is only `pnpm build` (tsc + vite) and `cargo test` (23 passing). `pnpm tauri dev` launched cleanly with no Rust errors, but **no UI has been exercised by a human or by us**. The next job is a manual smoke test and fixing what breaks, not new features.
 
 Smoke-test order (riskiest first):
+
 1. Editor: type `[[` (note/source picker) and `/` (slash menu) in a note.
 2. Connections: add two entities, connect them, drag a node, navigate away and back; the position must persist.
 3. ⌘K search finds a note by partial title; Enter opens it.
@@ -14,10 +15,12 @@ Smoke-test order (riskiest first):
 5. Publication queue: article status changes; Markdown/HTML export; PDF opens a print view in the browser.
 
 ## Commands
+
 - `pnpm tauri dev` run the app. `pnpm build` type-check + bundle. `cd src-tauri && cargo test` Rust tests.
 - pnpm is strict: import only packages listed in `package.json` (e.g. `@tiptap/core` had to be added directly).
 
 ## Architecture
+
 - **Rust owns the data.** `rusqlite` (bundled, has FTS5). The frontend only calls `invoke` (typed wrappers in `src/lib/api.ts`). Commands return `Result<T, String>`.
 - Logic lives in plain functions taking `&Connection` so tests use `db::open(Path::new(":memory:"))`; `#[tauri::command]` fns are thin wrappers. State: `db::Db(Mutex<Connection>)`, `sources::Vault(PathBuf)`.
 - **Migrations** are an append-only `MIGRATIONS` array in `src-tauri/src/db.rs`, tracked by `PRAGMA user_version` (currently 8, see `db::schema_version()`). Never edit an existing entry; add a new one. Every new command must be registered in `invoke_handler` in `lib.rs`.
@@ -33,17 +36,21 @@ Smoke-test order (riskiest first):
 - SQLite timestamps are UTC with no zone marker; use `parseSqlite` in `src/lib/format.ts`.
 
 ## Conventions
+
 - Validate in Rust (status/kind whitelists, same-case checks, friendly constraint errors), not only in the UI.
 - When a mutation changes data shown elsewhere, invalidate those query keys in `src/lib/queries.ts` (e.g. `useDeleteCase` fans out to many keys; the `["queue"]` key for publication).
 - Keep exports publish-safe: internal `[[links]]` and source mentions export as plain text; only http(s)/mailto links survive.
 
 ## Known gaps / where to continue
+
 Deliberately left out:
+
 - **Encryption at rest (SQLCipher) and app lock.** A lock without encryption is cosmetic; this needs its own slice (toolchain change, migrating existing data, passphrase-loss policy, encrypting evidence files, and the FTS index holds full note text). FileVault/BitLocker is the interim answer; Settings says backups are unencrypted.
 - Configurable vault location (data dir is fixed; Settings shows the path and can reveal it).
 - One-click PDF: PDF currently opens an HTML print view (`vault/exports/`, deleted at startup) in the browser.
 
 Small known issues:
+
 - Case codes are `FN-{MAX(id)+1}`; deleting the newest case reuses its code.
 - `[[` chips keep a snapshot title and go stale after a rename/delete of the target.
 - Leads can't be edited after capture; promoted leads become only link/note sources.
