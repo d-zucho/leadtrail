@@ -7,6 +7,7 @@ const NAV = [
   { to: "/inbox", label: "Lead inbox" },
   { to: "/sources", label: "Source library" },
   { to: "/connections", label: "Connections" },
+  { to: "/people", label: "People & Companies" },
   { to: "/publication", label: "Publication queue" },
   { to: "/settings", label: "Settings" },
 ];
