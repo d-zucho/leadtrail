@@ -69,21 +69,25 @@ pub fn update_party(conn: &Connection, id: i64, input: &PartyInput) -> Result<()
 }
 
 pub fn delete_party(conn: &Connection, id: i64) -> Result<(), String> {
-    let linked: i64 = conn
+    let e = |e: rusqlite::Error| e.to_string();
+    let tx = conn.unchecked_transaction().map_err(e)?;
+    let linked: i64 = tx
         .query_row("SELECT COUNT(*) FROM entities WHERE party_id = ?1", [id], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
+        .map_err(e)?;
     if linked > 0 {
         return Err("This record is linked to one or more case files. Remove those links first.".into());
     }
-    let n = conn
-        .execute("DELETE FROM parties WHERE id = ?1", [id])
-        .map_err(|e| e.to_string())?;
-    if n == 0 {
+    let exists: i64 = tx
+        .query_row("SELECT COUNT(*) FROM parties WHERE id = ?1", [id], |r| r.get(0))
+        .map_err(e)?;
+    if exists == 0 {
         return Err("record not found".into());
     }
-    conn.execute("DELETE FROM links WHERE dst_type = 'party' AND dst_id = ?1", [id])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    crate::mentions::detach_party_chips(&tx, id).map_err(e)?;
+    tx.execute("DELETE FROM parties WHERE id = ?1", [id]).map_err(e)?;
+    tx.execute("DELETE FROM links WHERE dst_type = 'party' AND dst_id = ?1", [id])
+        .map_err(e)?;
+    tx.commit().map_err(e)
 }
 
 pub fn search_parties(

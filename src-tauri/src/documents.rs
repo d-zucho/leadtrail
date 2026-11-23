@@ -492,6 +492,83 @@ mod tests {
         conn.execute("UPDATE documents SET content_json = ?1 WHERE id = 1", [json]).unwrap();
     }
 
+    fn doc_json(chips: &[(&str, &str)]) -> String {
+        let nodes: Vec<String> = chips.iter().map(|(i, l)| mention(i, l)).collect();
+        format!(
+            r#"{{"type":"doc","content":[{{"type":"paragraph","content":[{}]}}]}}"#,
+            nodes.join(",")
+        )
+    }
+
+    fn new_party(conn: &Connection, name: &str) -> i64 {
+        crate::parties::create_party(
+            conn,
+            &crate::parties::PartyInput {
+                kind: "person".into(),
+                name: name.into(),
+                aliases: None,
+                description: None,
+                shared: Some(true),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn deleting_the_newest_record_does_not_let_a_new_one_inherit_its_chips() {
+        let conn = setup();
+        assert_eq!(new_party(&conn, "Ann"), 1);
+        assert_eq!(new_party(&conn, "John Doe"), 2);
+        save_content(&conn, &doc_json(&[("party:1", "Ann"), ("party:2", "John Doe")]));
+        replace_links(&conn, 1, 1, &[link("party", 1), link("party", 2)]).unwrap();
+        crate::parties::delete_party(&conn, 2).unwrap();
+        assert_eq!(new_party(&conn, "Jane Roe"), 2);
+        let out = fetch(&conn, 1).unwrap().content_json;
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let p = &v["content"][0]["content"];
+        assert_eq!(p[0]["attrs"]["id"], "party:1");
+        assert_eq!(p[0]["attrs"]["label"], "Ann");
+        assert_eq!(p[1]["attrs"]["id"], "deleted-party:2");
+        assert_eq!(p[1]["attrs"]["label"], "John Doe");
+        assert!(crate::mentions::party_mentions(&conn, 2, Some(1)).unwrap().is_empty());
+        assert_eq!(crate::mentions::party_mentions(&conn, 1, Some(1)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_delete_leaves_the_note_unchanged() {
+        let conn = setup();
+        assert_eq!(new_party(&conn, "Ann"), 1);
+        conn.execute(
+            "INSERT INTO entities (case_id, kind, name, party_id) VALUES (1, 'person', 'Ann', 1)",
+            [],
+        )
+        .unwrap();
+        let json = doc_json(&[("party:1", "Ann")]);
+        save_content(&conn, &json);
+        assert!(crate::parties::delete_party(&conn, 1).is_err());
+        let stored: String = conn
+            .query_row("SELECT content_json FROM documents WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, json);
+    }
+
+    #[test]
+    fn deleted_party_chips_are_ignored_by_refresh_and_links() {
+        let conn = setup();
+        assert_eq!(new_party(&conn, "Ann"), 1);
+        for _ in 0..4 {
+            new_party(&conn, "Filler");
+        }
+        let json = doc_json(&[("deleted-party:5", "Old Name")]);
+        let out = crate::mentions::refresh_party_labels(&conn, &json);
+        assert_eq!(out, json);
+        replace_links(&conn, 1, 1, &[link("deleted-party", 5)]).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM links WHERE src_doc_id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
     #[test]
     fn fetch_shows_current_party_names() {
         let conn = setup();

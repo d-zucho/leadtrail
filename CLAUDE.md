@@ -4,7 +4,7 @@ Local-first Tauri 2 desktop app for investigative journalists, researchers and i
 
 ## Status: the 11 original slices are built and manually smoke-tested
 
-Verification: `pnpm build` (tsc + vite), `cargo test` (55 passing), and a manual smoke test in `pnpm tauri dev` (2026-11-23) of the five riskiest flows. All passed:
+Verification: `pnpm build` (tsc + vite), `cargo test` (59 passing), and a manual smoke test in `pnpm tauri dev` (2026-11-23) of the five riskiest flows. All passed:
 
 1. Editor: `[[` picker (filters as you type, inserts a chip), `/` slash menu, links show up on the linked note after save.
 2. Connections: entities, edges, node drag; position persists after navigating away.
@@ -34,7 +34,7 @@ Mentions of people and companies in notes are built but not yet exercised by han
 - Data dir = Tauri `app_data_dir`: `fieldnotes.db` + `vault/evidence/<case_id>/<hash12>-<name>`. Evidence is SHA-256 hashed, verified after copy, deduped per case.
 - Modules (`src-tauri/src/`): `cases`, `sources`, `leads`, `documents` (also article status + export commands), `mentions`, `questions`, `activity`, `connections`, `parties`, `search`, `export` (TipTap JSON → Markdown/HTML), `backup`, `db`.
 - **Search:** FTS5 table `search` kept in sync by SQL triggers on cases/sources/leads/documents/questions/entities/parties (rowid = `id*8 + kind_code`). New searchable tables need triggers too.
-- **Links:** editor mentions have ids `doc:<id>` / `src:<id>` / `party:<id>`; on save the frontend extracts them and `replace_links` keeps only existing, non-self targets, same-case for notes and sources. `party:` targets are global (any case) and a missing or deleted record never fails a save. Polymorphic targets have no FK, so delete code removes `links` rows by hand (`delete_party` removes its party links). `party:` chip labels are resolved to current names in `documents::fetch` via `mentions::refresh_party_labels`, so opening and exporting a note show current names; the stored JSON and the note's search text keep the old name until the next save.
+- **Links:** editor mentions have ids `doc:<id>` / `src:<id>` / `party:<id>`; on save the frontend extracts them and `replace_links` keeps only existing, non-self targets, same-case for notes and sources. `party:` targets are global (any case) and a missing or deleted record never fails a save. Polymorphic targets have no FK, so delete code removes `links` rows by hand (`delete_party` removes its party links). `party:` chip labels are resolved to current names in `documents::fetch` via `mentions::refresh_party_labels`, so opening and exporting a note show current names; the stored JSON and the note's search text keep the old name until the next save. SQLite reuses ids of deleted rows, so `delete_party` (one transaction) rewrites leftover chips to `deleted-party:<id>` (plain text, label kept, no link) via `mentions::detach_party_chips`.
 - **Mentioned in:** a record's list (`mentions::party_mentions`) shows notes in the case you came from (`?case=`) always, other cases' notes only when the record is shared; with no case context and an unshared record nothing is listed.
 - **Restore** never touches the live DB: it validates and stages the zip, restarts, and `backup::apply_pending` swaps it in before the DB opens.
 - Frontend: React 19, TS, Vite 8, Tailwind v4 (tokens in `@theme` in `src/index.css`), `react-router` 8 with HashRouter, TanStack Query, zustand (`src/store/ui.ts`), `@/` alias to `src`. Fonts are bundled via `@fontsource-variable/*` (no network calls; keep it that way).
@@ -68,6 +68,6 @@ Small known issues:
 - Source modal doesn't show which notes cite the source (backend `list_source_citations` exists).
 - Article status isn't shown in the case's document list (only in the editor and the Publication queue). Editing a published article doesn't change its status.
 - Notes and articles share one editor; no image support in the editor or exports.
-- Entities are still not linked to notes via `[[`; no merge action for duplicate records yet; no "view in graph" shortcut from the directory.
+- Case entities (graph nodes) are not mentioned directly; notes mention the global record; no merge action for duplicate records yet; no "view in graph" shortcut from the directory.
 - Search matches words only (punctuation dropped); sources/questions results land on the case page.
 - Dashboard has no names in the greeting and no question owners; `src/routes/Placeholder.tsx` is now unused.

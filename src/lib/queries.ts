@@ -74,6 +74,7 @@ function usePartyMutation<V, R>(fn: (v: V) => Promise<R>) {
       qc.invalidateQueries({ queryKey: ["parties"] });
       qc.invalidateQueries({ queryKey: ["graph"] });
       qc.invalidateQueries({ queryKey: ["cases"] });
+      qc.invalidateQueries({ queryKey: ["documents", "one"], refetchType: "none" });
     },
   });
 }

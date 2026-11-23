@@ -47,9 +47,11 @@ export function buildExtensions(ctx: EditorContext): Extensions {
         "span",
         {
           ...options.HTMLAttributes,
-          class: String(node.attrs.id ?? "").startsWith("party:")
-            ? "wikilink wikilink-party"
-            : "wikilink",
+          class: String(node.attrs.id ?? "").startsWith("deleted-party:")
+            ? "wikilink wikilink-dead"
+            : String(node.attrs.id ?? "").startsWith("party:")
+              ? "wikilink wikilink-party"
+              : "wikilink",
           "data-type": "mention",
           "data-id": node.attrs.id,
         },
@@ -67,7 +69,7 @@ export function buildExtensions(ctx: EditorContext): Extensions {
             .filter((t) => t.label.toLowerCase().includes(q))
             .slice(0, 8);
           const exact = matches.some((t) => t.label.toLowerCase() === q);
-          if (q) {
+          if (q && /[\p{L}\p{N}]/u.test(q)) {
             let parties: PartyRow[] = [];
             try {
               parties = await ctx.searchParties(query.trim());

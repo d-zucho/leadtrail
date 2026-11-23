@@ -54,6 +54,44 @@ pub fn refresh_party_labels(conn: &Connection, content_json: &str) -> String {
     }
 }
 
+fn detach(v: &mut Value, from: &str, to: &str) -> bool {
+    let mut changed = false;
+    if v.get("type").and_then(Value::as_str) == Some("mention")
+        && v.pointer("/attrs/id").and_then(Value::as_str) == Some(from)
+    {
+        v["attrs"]["id"] = Value::String(to.to_string());
+        changed = true;
+    }
+    if let Some(children) = v.get_mut("content").and_then(Value::as_array_mut) {
+        for c in children {
+            changed |= detach(c, from, to);
+        }
+    }
+    changed
+}
+
+/// Rewrites every `party:<id>` chip to `deleted-party:<id>` (label kept) in all
+/// notes, without touching `updated_at`. SQLite reuses ids of deleted rows, so
+/// leftover chips must stop pointing at the id. Unparseable JSON is left alone.
+pub fn detach_party_chips(conn: &Connection, party_id: i64) -> rusqlite::Result<()> {
+    let from = format!("party:{party_id}");
+    let to = format!("deleted-party:{party_id}");
+    let needle = format!("\"{from}\"");
+    let mut stmt = conn.prepare("SELECT id, content_json FROM documents WHERE instr(content_json, ?1) > 0")?;
+    let rows: Vec<(i64, String)> = stmt
+        .query_map([&needle], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (id, json) in rows {
+        let Ok(mut v) = serde_json::from_str::<Value>(&json) else { continue };
+        if detach(&mut v, &from, &to) {
+            if let Ok(out) = serde_json::to_string(&v) {
+                conn.execute("UPDATE documents SET content_json = ?1 WHERE id = ?2", params![out, id])?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn party_mentions(
     conn: &Connection,
     party_id: i64,
@@ -152,6 +190,14 @@ mod tests {
         let r = party_mentions(&c, 1, None).unwrap();
         assert_eq!(r.len(), 2);
         assert!(r.iter().all(|m| m.case_code.is_some()));
+    }
+
+    #[test]
+    fn a_stale_case_id_lists_nothing_for_an_unshared_record() {
+        let c = setup(false);
+        assert!(party_mentions(&c, 1, Some(999)).unwrap().is_empty());
+        let c = setup(true);
+        assert_eq!(party_mentions(&c, 1, Some(999)).unwrap().len(), 2);
     }
 
     #[test]

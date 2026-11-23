@@ -142,3 +142,9 @@ body {
   background: var(--color-forest);
   color: white;
 }
+.prose-editor .wikilink.wikilink-dead,
+.prose-editor .wikilink.wikilink-dead:hover {
+  background: transparent;
+  color: var(--color-muted, #6b7280);
+  cursor: default;
+}
