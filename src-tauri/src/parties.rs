@@ -127,6 +127,95 @@ pub fn search_parties(
     }
 }
 
+#[derive(Serialize)]
+pub struct CaseRef {
+    pub case_id: i64,
+    pub code: String,
+    pub title: String,
+    pub connections: i64,
+}
+
+#[derive(Serialize)]
+pub struct PartyDetail {
+    pub id: i64,
+    pub kind: String,
+    pub name: String,
+    pub aliases: String,
+    pub description: String,
+    pub shared: bool,
+    pub in_this_case: Option<CaseRef>,
+    /// Only `Some` when the record is shared; unshared records never reveal other cases.
+    pub cases: Option<Vec<CaseRef>>,
+}
+
+pub fn link_party(conn: &Connection, case_id: i64, party_id: i64) -> Result<i64, String> {
+    conn.query_row("SELECT 1 FROM cases WHERE id = ?1", [case_id], |_| Ok(()))
+        .map_err(|_| "case file not found".to_string())?;
+    let n = conn
+        .execute(
+            "INSERT INTO entities (case_id, kind, name, notes, party_id)
+             SELECT ?1, kind, name, '', id FROM parties WHERE id = ?2",
+            params![case_id, party_id],
+        )
+        .map_err(|e| match &e {
+            rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => {
+                "this case file already has that person or organization".to_string()
+            }
+            _ => e.to_string(),
+        })?;
+    if n == 0 {
+        return Err("record not found".into());
+    }
+    let id = conn.last_insert_rowid();
+    crate::connections::touch_case(conn, case_id)?;
+    Ok(id)
+}
+
+pub fn create_and_link(conn: &Connection, case_id: i64, input: &PartyInput) -> Result<i64, String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let party_id = create_party(&tx, input)?;
+    let id = link_party(&tx, case_id, party_id)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+pub fn get_party(conn: &Connection, id: i64, case_id: Option<i64>) -> Result<PartyDetail, String> {
+    let (kind, name, aliases, description, shared): (String, String, String, String, bool) = conn
+        .query_row(
+            "SELECT kind, name, aliases, description, shared FROM parties WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .map_err(|_| "record not found".to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT c.id, c.code, c.title,
+                    (SELECT COUNT(*) FROM relationships r WHERE r.from_id = e.id OR r.to_id = e.id)
+             FROM entities e JOIN cases c ON c.id = e.case_id
+             WHERE e.party_id = ?1 ORDER BY c.code",
+        )
+        .map_err(|e| e.to_string())?;
+    let all = stmt
+        .query_map([id], |r| {
+            Ok(CaseRef { case_id: r.get(0)?, code: r.get(1)?, title: r.get(2)?, connections: r.get(3)? })
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| e.to_string())?;
+    let in_this_case = case_id.and_then(|cid| {
+        all.iter().find(|c| c.case_id == cid).map(|c| CaseRef { case_id: c.case_id, code: c.code.clone(), title: c.title.clone(), connections: c.connections })
+    });
+    Ok(PartyDetail {
+        id,
+        kind,
+        name,
+        aliases,
+        description,
+        shared,
+        in_this_case,
+        cases: if shared { Some(all) } else { None },
+    })
+}
+
 /// Tauri commands. They live in their own module so the invoke names
 /// (`create_party`, ...) can match the plain logic functions above.
 pub mod commands {
@@ -159,6 +248,21 @@ pub mod commands {
         limit: Option<i64>,
     ) -> Result<Vec<PartyRow>, String> {
         super::search_parties(&*db.0.lock().map_err(err)?, &query, case_id, limit.unwrap_or(8)).map_err(err)
+    }
+
+    #[tauri::command]
+    pub fn link_party(db: State<Db>, case_id: i64, party_id: i64) -> Result<i64, String> {
+        super::link_party(&*db.0.lock().map_err(err)?, case_id, party_id)
+    }
+
+    #[tauri::command]
+    pub fn create_party_and_link(db: State<Db>, case_id: i64, input: PartyInput) -> Result<i64, String> {
+        super::create_and_link(&*db.0.lock().map_err(err)?, case_id, &input)
+    }
+
+    #[tauri::command]
+    pub fn get_party(db: State<Db>, id: i64, case_id: Option<i64>) -> Result<PartyDetail, String> {
+        super::get_party(&*db.0.lock().map_err(err)?, id, case_id)
     }
 }
 
@@ -306,5 +410,99 @@ mod tests {
         c.execute("DELETE FROM entities WHERE party_id = ?1", [id]).unwrap();
         delete_party(&c, id).unwrap();
         assert!(search_parties(&c, "", None, 10).unwrap().is_empty());
+    }
+
+    fn case_code(c: &Connection, id: i64) -> String {
+        c.query_row("SELECT code FROM cases WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn link_party_copies_identity_into_the_involvement() {
+        let c = conn();
+        let p = create_party(&c, &input("public_body", "Water Dept")).unwrap();
+        let eid = link_party(&c, 1, p).unwrap();
+        let g = crate::connections::load_graph(&c, 1).unwrap();
+        assert_eq!(g.entities.len(), 1);
+        let e = &g.entities[0];
+        assert_eq!((e.id, e.party_id), (eid, p));
+        assert_eq!((e.kind.as_str(), e.name.as_str()), ("public_body", "Water Dept"));
+    }
+
+    #[test]
+    fn same_party_twice_is_rejected_with_a_readable_message() {
+        let c = conn();
+        let p = create_party(&c, &input("person", "John Smith")).unwrap();
+        let q = create_party(&c, &input("person", "John Smith")).unwrap();
+        link_party(&c, 1, p).unwrap();
+        let e = link_party(&c, 1, p).unwrap_err();
+        assert!(e.contains("already"), "got: {e}");
+        link_party(&c, 1, q).unwrap();
+    }
+
+    #[test]
+    fn link_rejects_missing_case_or_party() {
+        let c = conn();
+        let p = create_party(&c, &input("person", "Bob")).unwrap();
+        assert!(link_party(&c, 99, p).is_err());
+        assert!(link_party(&c, 1, 99).is_err());
+    }
+
+    #[test]
+    fn detail_hides_cases_unless_shared() {
+        let c = conn();
+        let p = create_party(&c, &full("Acme", "", "", false)).unwrap();
+        let e1 = link_party(&c, 1, p).unwrap();
+        link_party(&c, 2, p).unwrap();
+        let other = create_party(&c, &input("person", "Zed")).unwrap();
+        let z = link_party(&c, 1, other).unwrap();
+        c.execute(
+            "INSERT INTO relationships (case_id, from_id, to_id, label) VALUES (1, ?1, ?2, 'owns')",
+            params![e1, z],
+        )
+        .unwrap();
+        let d = get_party(&c, p, Some(1)).unwrap();
+        assert!(d.cases.is_none());
+        let here = d.in_this_case.as_ref().unwrap();
+        assert_eq!((here.case_id, here.connections), (1, 1));
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(!json.contains("Case B") && !json.contains(&case_code(&c, 2)), "leaked: {json}");
+        assert!(get_party(&c, p, None).unwrap().in_this_case.is_none());
+
+        update_party(&c, p, &full("Acme", "", "", true)).unwrap();
+        c.execute(
+            "INSERT INTO relationships (case_id, from_id, to_id, label) VALUES (1, ?1, ?2, 'x')",
+            params![e1, z],
+        )
+        .unwrap();
+        let d = get_party(&c, p, Some(1)).unwrap();
+        let cases = d.cases.unwrap();
+        assert_eq!(cases.len(), 2);
+        let a = cases.iter().find(|r| r.case_id == 1).unwrap();
+        let b = cases.iter().find(|r| r.case_id == 2).unwrap();
+        assert_eq!((a.connections, b.connections), (2, 0));
+        assert_eq!(b.title, "Case B");
+    }
+
+    #[test]
+    fn deleting_a_case_keeps_its_records() {
+        let c = conn();
+        let p = create_party(&c, &input("person", "Bob")).unwrap();
+        link_party(&c, 2, p).unwrap();
+        c.execute("DELETE FROM cases WHERE id = 2", []).unwrap();
+        assert_eq!(search_parties(&c, "", None, 10).unwrap().len(), 1);
+        delete_party(&c, p).unwrap();
+    }
+
+    #[test]
+    fn create_and_link_is_atomic() {
+        let c = conn();
+        let n = |c: &Connection| -> i64 { c.query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0)).unwrap() };
+        assert!(create_and_link(&c, 1, &input("person", "  ")).is_err());
+        assert_eq!(n(&c), 0);
+        assert!(create_and_link(&c, 99, &input("person", "Bob")).is_err());
+        assert_eq!(n(&c), 0);
+        let eid = create_and_link(&c, 1, &input("person", "Bob")).unwrap();
+        assert_eq!(n(&c), 1);
+        assert_eq!(crate::connections::load_graph(&c, 1).unwrap().entities[0].id, eid);
     }
 }
