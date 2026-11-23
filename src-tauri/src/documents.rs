@@ -74,7 +74,7 @@ fn err<E: ToString>(e: E) -> String {
 }
 
 fn fetch(conn: &Connection, id: i64) -> Result<Doc, String> {
-    conn.query_row(
+    let mut doc = conn.query_row(
         "SELECT id, case_id, kind, title, content_json, status, published_at, created_at, updated_at FROM documents WHERE id = ?1",
         [id],
         |r| {
@@ -91,7 +91,9 @@ fn fetch(conn: &Connection, id: i64) -> Result<Doc, String> {
             })
         },
     )
-    .map_err(|_| "document not found".to_string())
+    .map_err(|_| "document not found".to_string())?;
+    doc.content_json = crate::mentions::refresh_party_labels(conn, &doc.content_json);
+    Ok(doc)
 }
 
 fn summary(r: &Row) -> rusqlite::Result<DocSummary> {
@@ -119,18 +121,23 @@ pub fn replace_links(
         let table = match l.dst_type.as_str() {
             "document" => "documents",
             "source" => "sources",
+            "party" => "parties",
             _ => continue,
         };
         if l.dst_type == "document" && l.dst_id == doc_id {
             continue;
         }
-        let ok = conn
-            .query_row(
+        // Parties are global records, so they are not tied to the note's case.
+        let ok = if l.dst_type == "party" {
+            conn.query_row("SELECT 1 FROM parties WHERE id = ?1", [l.dst_id], |_| Ok(()))
+        } else {
+            conn.query_row(
                 &format!("SELECT 1 FROM {table} WHERE id = ?1 AND case_id = ?2"),
                 params![l.dst_id, case_id],
                 |_| Ok(()),
             )
-            .is_ok();
+        }
+        .is_ok();
         if ok {
             conn.execute(
                 "INSERT OR IGNORE INTO links (src_doc_id, dst_type, dst_id, label) VALUES (?1, ?2, ?3, ?4)",
@@ -439,5 +446,94 @@ mod tests {
         conn.execute("DELETE FROM documents WHERE id = 1", []).unwrap();
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM links", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
+    }
+    fn party(conn: &Connection, id: i64, name: &str) {
+        conn.execute(
+            "INSERT INTO parties (id, kind, name) VALUES (?1, 'person', ?2)",
+            params![id, name],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn replace_links_accepts_party_targets_from_any_case_and_skips_missing_ones() {
+        let conn = setup();
+        party(&conn, 1, "Ann");
+        conn.execute(
+            "INSERT INTO entities (case_id, kind, name, party_id) VALUES (2, 'person', 'Ann', 1)",
+            [],
+        )
+        .unwrap();
+        replace_links(&conn, 1, 1, &[link("party", 1), link("party", 999)]).unwrap();
+        let rows: Vec<(String, i64)> = conn
+            .prepare("SELECT dst_type, dst_id FROM links WHERE src_doc_id = 1")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![("party".to_string(), 1)]);
+    }
+
+    #[test]
+    fn a_notes_backlinks_ignore_party_links() {
+        let conn = setup();
+        party(&conn, 1, "Ann");
+        replace_links(&conn, 1, 1, &[link("party", 1)]).unwrap();
+        conn.execute("UPDATE links SET dst_id = 2 WHERE dst_type = 'party'", []).unwrap();
+        assert!(backlinks_to(&conn, "document", 2).unwrap().is_empty());
+    }
+
+    fn mention(id: &str, label: &str) -> String {
+        format!(r#"{{"type":"mention","attrs":{{"id":"{id}","label":"{label}"}}}}"#)
+    }
+
+    fn save_content(conn: &Connection, json: &str) {
+        conn.execute("UPDATE documents SET content_json = ?1 WHERE id = 1", [json]).unwrap();
+    }
+
+    #[test]
+    fn fetch_shows_current_party_names() {
+        let conn = setup();
+        party(&conn, 1, "Old");
+        conn.execute("UPDATE parties SET name = 'Renamed' WHERE id = 1", []).unwrap();
+        let json = format!(
+            r#"{{"type":"doc","content":[{{"type":"paragraph","content":[{},{},{},{}]}},{{"type":"bulletList","content":[{{"type":"listItem","content":[{{"type":"paragraph","content":[{}]}}]}}]}}]}}"#,
+            mention("party:1", "Old"),
+            mention("party:999", "Gone"),
+            mention("doc:3", "Keep"),
+            mention("src:3", "Keep2"),
+            mention("party:1", "Old")
+        );
+        save_content(&conn, &json);
+        let out = fetch(&conn, 1).unwrap().content_json;
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let p = &v["content"][0]["content"];
+        assert_eq!(p[0]["attrs"]["label"], "Renamed");
+        assert_eq!(p[1]["attrs"]["label"], "Gone");
+        assert_eq!(p[2]["attrs"]["label"], "Keep");
+        assert_eq!(p[3]["attrs"]["label"], "Keep2");
+        assert_eq!(v["content"][1]["content"][0]["content"][0]["content"][0]["attrs"]["label"], "Renamed");
+        save_content(&conn, "not json");
+        assert_eq!(fetch(&conn, 1).unwrap().content_json, "not json");
+    }
+
+    #[test]
+    fn exports_use_the_current_party_name_and_no_ids() {
+        let conn = setup();
+        party(&conn, 1, "Old");
+        conn.execute("UPDATE parties SET name = 'Renamed' WHERE id = 1", []).unwrap();
+        let json = format!(
+            r#"{{"type":"doc","content":[{{"type":"paragraph","content":[{}]}}]}}"#,
+            mention("party:1", "Old")
+        );
+        save_content(&conn, &json);
+        let content = fetch(&conn, 1).unwrap().content_json;
+        let md = crate::export::to_markdown("T", &content);
+        let html = crate::export::to_html("T", &content, false);
+        for out in [md, html] {
+            assert!(out.contains("Renamed"));
+            assert!(!out.contains("party:"));
+        }
     }
 }
