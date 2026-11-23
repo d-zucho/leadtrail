@@ -58,6 +58,12 @@ export const useParty = (id: number | undefined, caseId: number | undefined) =>
     queryFn: () => api.getParty(id!, caseId),
     enabled: id !== undefined,
   });
+export const usePartyMentions = (partyId: number | undefined, caseId: number | undefined) =>
+  useQuery({
+    queryKey: ["parties", "mentions", partyId, caseId],
+    queryFn: () => api.listPartyMentions(partyId!, caseId),
+    enabled: partyId !== undefined,
+  });
 
 /** Party edits change names copied into involvements, so refresh parties, graph and cases. */
 function usePartyMutation<V, R>(fn: (v: V) => Promise<R>) {
@@ -185,6 +191,7 @@ export function useSaveDocument() {
       qc.invalidateQueries({ queryKey: ["documents", "case"] });
       qc.invalidateQueries({ queryKey: ["queue"] });
       qc.invalidateQueries({ queryKey: ["backlinks"] });
+      qc.invalidateQueries({ queryKey: ["parties"] });
     },
   });
 }
