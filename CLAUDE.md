@@ -19,7 +19,9 @@ Open issues from the smoke test:
 
 Global people & companies (shared `parties`, picker, directory page) passed a manual smoke test on 2026-11-23.
 
-Mentions of people and companies in notes are built but not yet exercised by hand. Next job: smoke-test them. Checks: `[[` lists people/companies after notes and sources, each with a kind label; Enter inserts a visually distinct chip; a blank `[[` shows no record rows; clicking the chip opens the record's page; the record's "Mentioned in" lists the notes; an unshared record hides other cases' notes; a rename shows on reopening the note and in Markdown/HTML export; deleting a record leaves the notes intact.
+Mentions of people and companies in notes (merged in PR #3) passed a manual smoke test on 2026-11-23: `[[` lists people/companies after notes and sources with a kind label; Enter inserts a distinct chip; clicking it opens the record; "Mentioned in" respects the sharing switch; a rename shows on reopening and in exports; deleting a record leaves the notes intact.
+
+Next planned slice: encryption at rest (see Known gaps). It needs a design first. Where we left off (2026-11-24): the user chose encryption over merge-duplicates, "cited in notes" on sources, and `[[` inline creation. Brainstorming had just started: the one open question to the user is "what's the specific bad day you picture this protecting a journalist from?" (stolen laptop, shared computer, border search, subpoena), and it is unanswered. No design doc exists yet. Do not start building; resume the brainstorming flow, then write `docs/superpowers/specs/<date>-encryption-at-rest-design.md`. Questions to settle: passphrase vs OS keychain, what happens if the passphrase is lost, migrating existing unencrypted data, encrypting evidence files and the FTS index (it holds full note text), whether backups get encrypted, and the SQLCipher toolchain change.
 
 ## Commands
 
